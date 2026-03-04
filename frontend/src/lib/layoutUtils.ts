@@ -3,9 +3,10 @@
 export type LayoutStyle = 'mindmap' | 'tree-lr' | 'tree-tb';
 export type NodeSide = 'left' | 'right';
 
-const H_GAP = 220; // 水平节点间距
-const V_GAP = 70;  // 垂直节点间距
-const NODE_H = 40; // 默认高度（无 measured 时的克驱値）
+const H_NODE_SPACING = 80; // 节点边缘到边缘的最小水平间距（右边缘→子左边缘 / 子右边缘→父左边缘）
+const V_GAP = 70;          // 垂直节点间距
+const NODE_H = 40;         // 默认高度（无 measured 时的回退值）
+const NODE_W = 80;         // 默认宽度（无 measured 时的回退值）
 
 /** 构建从 nodeId  childrenIds 的邻接表（仅层级边） */
 function buildTree(nodes: Node[], edges: Edge[]): Map<string, string[]> {
@@ -46,9 +47,14 @@ function makeSubtreeHeight(
  *
  * ★ 坐标约定（统一，不可混用）：
  *   cy = 当前节点自身的 Y 轴中心（center Y），不是 top-left！
+ *   cx = 当前节点自身的 X 轴左边缘（left X），对应 posMap 存储的 x。
  *   保存到 posMap 时转为 ReactFlow 要求的 top-left：y = cy - nodeH/2
  *
- * 这样无论节点高度多少，父子中心对齐和组间距计算都不会出错。
+ * ★ 水平间距约定：
+ *   子节点的左边缘 = 父节点右边缘 + H_NODE_SPACING（右向）
+ *   子节点的右边缘 = 父节点左边缘 - H_NODE_SPACING（左向，right edge = cx - H_NODE_SPACING）
+ *
+ * 这样无论父/子节点宽度多少，节点间始终保持固定的视觉间隔，大内容节点不会与子节点重叠。
  */
 function makePlaceSubtree(
   childrenMap: Map<string, string[]>,
@@ -56,20 +62,26 @@ function makePlaceSubtree(
   posMap: Map<string, { x: number; y: number }>,
   sideMap: Map<string, NodeSide>,
   heightMap: Map<string, number>,
+  widthMap: Map<string, number>,
 ) {
   function place(nodeId: string, cx: number, cy: number, direction: NodeSide) {
-    // cy = 节点中心 Y → 转为 top-left Y 存入 posMap
+    // cy = 节点中心 Y → 转为 top-left Y 存入 posMap；cx = 节点左边缘 X
     const nodeH = heightMap.get(nodeId) ?? NODE_H;
+    const nodeW = widthMap.get(nodeId) ?? NODE_W;
     posMap.set(nodeId, { x: cx, y: cy - nodeH / 2 });
     sideMap.set(nodeId, direction);
     const children = childrenMap.get(nodeId) ?? [];
     if (children.length === 0) return;
 
-    const childX = direction === 'right' ? cx + H_GAP : cx - H_GAP;
-
     if (children.length === 1) {
       // 单子节点：子节点中心 Y = 父节点中心 Y（水平连线对齐）
-      place(children[0], childX, cy, direction);
+      const childId = children[0];
+      const childW = widthMap.get(childId) ?? NODE_W;
+      // 右向：子左边缘 = 父右边缘 + 间距；左向：子右边缘 = 父左边缘 - 间距
+      const childCx = direction === 'right'
+        ? cx + nodeW + H_NODE_SPACING
+        : cx - H_NODE_SPACING - childW;
+      place(childId, childCx, cy, direction);
       return;
     }
 
@@ -78,8 +90,12 @@ function makePlaceSubtree(
     let startY = cy - totalH / 2; // 第一个子树区域的顶部 Y
     children.forEach((childId) => {
       const h = subtreeHeight(childId);
+      const childW = widthMap.get(childId) ?? NODE_W;
+      const childCx = direction === 'right'
+        ? cx + nodeW + H_NODE_SPACING
+        : cx - H_NODE_SPACING - childW;
       // 每个子树区域中心 = startY + h/2，传给子节点作为其中心 Y
-      place(childId, childX, startY + h / 2, direction);
+      place(childId, childCx, startY + h / 2, direction);
       startY += h + V_GAP;
     });
   }
@@ -101,6 +117,16 @@ function buildHeightMap(nodes: Node[]): Map<string, number> {
   return m;
 }
 
+/** 从 nodes 数组构建 节点实际宽度映射（优先用 React Flow 的 measured.width） */
+function buildWidthMap(nodes: Node[]): Map<string, number> {
+  const m = new Map<string, number>();
+  nodes.forEach((n) => {
+    const w = (n.measured as { width?: number; height?: number } | undefined)?.width;
+    m.set(n.id, typeof w === 'number' && w > 0 ? w : NODE_W);
+  });
+  return m;
+}
+
 function layoutMindmap(
   rootId: string,
   nodes: Node[],
@@ -110,8 +136,9 @@ function layoutMindmap(
   const posMap = new Map<string, { x: number; y: number }>();
   const sideMap = new Map<string, NodeSide>();
   const heightMap = buildHeightMap(nodes);
+  const widthMap = buildWidthMap(nodes);
   const subtreeHeight = makeSubtreeHeight(childrenMap, heightMap);
-  const place = makePlaceSubtree(childrenMap, subtreeHeight, posMap, sideMap, heightMap);
+  const place = makePlaceSubtree(childrenMap, subtreeHeight, posMap, sideMap, heightMap, widthMap);
 
   // 根节点本身放在原点
   posMap.set(rootId, { x: 0, y: 0 });
@@ -120,6 +147,7 @@ function layoutMindmap(
   const nodeDataMap = new Map(nodes.map((n) => [n.id, n.data]));
   const rootChildren = childrenMap.get(rootId) ?? [];
   const rootH = heightMap.get(rootId) ?? NODE_H;
+  const rootW = widthMap.get(rootId) ?? NODE_W;
 
   // 分组：已有 side 的固定；没有 side 的，偶数索引右，奇数索引左
   const rightChildren: string[] = [];
@@ -133,7 +161,7 @@ function layoutMindmap(
     } else if (side === 'right') {
       rightChildren.push(childId);
     } else {
-      // 没有 side：按奇偶分配（第 0、2、4... 个  右，第 1、3、5... 个  左）
+      // 没有 side：按奇偶分配（第 0、2、4... 个 → 右，第 1、3、5... 个 → 左）
       if (unassignedIdx % 2 === 0) {
         rightChildren.push(childId);
       } else {
@@ -143,33 +171,37 @@ function layoutMindmap(
     }
   });
 
-  // ★ place() 约定：cy = 节点中心 Y。
+  // ★ place() 约定：cy = 节点中心 Y，cx = 节点左边缘 X。
   // 根节点 top-left=(0,0)，根节点中心 Y = rootH/2。
   // 所有子节点以 rootH/2 为基准对齐。
+  // 右向子节点的左边缘 = 根节点右边缘 + H_NODE_SPACING
+  // 左向子节点的右边缘 = 根节点左边缘(0) - H_NODE_SPACING → 子节点左边缘 = -H_NODE_SPACING - childW
 
   // 放置右侧分支
   if (rightChildren.length === 1) {
     // 单子节点中心 Y = 根节点中心 Y
-    place(rightChildren[0], H_GAP, rootH / 2, 'right');
+    place(rightChildren[0], rootW + H_NODE_SPACING, rootH / 2, 'right');
   } else if (rightChildren.length > 1) {
     const totalH = rightChildren.reduce((s, c) => s + subtreeHeight(c) + V_GAP, 0) - V_GAP;
     let startY = rootH / 2 - totalH / 2; // 第一个子树区域顶部
     rightChildren.forEach((childId) => {
       const h = subtreeHeight(childId);
-      place(childId, H_GAP, startY + h / 2, 'right'); // 子树区域中心 = 节点中心
+      place(childId, rootW + H_NODE_SPACING, startY + h / 2, 'right'); // 子树区域中心 = 节点中心
       startY += h + V_GAP;
     });
   }
 
-  // 放置左侧分支
+  // 放置左侧分支（子节点右边缘 = 根节点左边缘 - H_NODE_SPACING）
   if (leftChildren.length === 1) {
-    place(leftChildren[0], -H_GAP, rootH / 2, 'left');
+    const childW = widthMap.get(leftChildren[0]) ?? NODE_W;
+    place(leftChildren[0], -H_NODE_SPACING - childW, rootH / 2, 'left');
   } else if (leftChildren.length > 1) {
     const totalH = leftChildren.reduce((s, c) => s + subtreeHeight(c) + V_GAP, 0) - V_GAP;
     let startY = rootH / 2 - totalH / 2;
     leftChildren.forEach((childId) => {
       const h = subtreeHeight(childId);
-      place(childId, -H_GAP, startY + h / 2, 'left');
+      const childW = widthMap.get(childId) ?? NODE_W;
+      place(childId, -H_NODE_SPACING - childW, startY + h / 2, 'left');
       startY += h + V_GAP;
     });
   }
@@ -187,8 +219,9 @@ function layoutTreeLR(
   const posMap = new Map<string, { x: number; y: number }>();
   const sideMap = new Map<string, NodeSide>();
   const heightMap = buildHeightMap(nodes);
+  const widthMap = buildWidthMap(nodes);
   const subtreeHeight = makeSubtreeHeight(childrenMap, heightMap);
-  const place = makePlaceSubtree(childrenMap, subtreeHeight, posMap, sideMap, heightMap);
+  const place = makePlaceSubtree(childrenMap, subtreeHeight, posMap, sideMap, heightMap, widthMap);
   // tree-lr：根节点 top-left=(0,0)，中心 Y = rootH/2
   const rootH = heightMap.get(rootId) ?? NODE_H;
   place(rootId, 0, rootH / 2, 'right');

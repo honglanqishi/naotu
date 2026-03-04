@@ -608,6 +608,32 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 return [nodeUndoAction, nodeRedoAction, addChildAction, copyAction, pasteNodeAction, newNodeAction];
             }
 
+            // 检测是否处于多选批量删除模式：右键点击的节点已被选中，且有其他节点也被选中
+            const selectedNonRootNodes = nodes.filter((n) => n.selected && !n.data?.isRoot);
+            const isBatchMode = !!targetNode?.selected && selectedNonRootNodes.length > 1;
+
+            if (isBatchMode) {
+                // 批量删除：删除所有选中节点（含各自子孙）
+                const batchDeleteAction: ContextMenuAction = {
+                    label: `删除选中节点 (${selectedNonRootNodes.length})`,
+                    icon: <TrashIcon />,
+                    danger: true,
+                    onClick: () => {
+                        pushHistory();
+                        const toDelete = new Set<string>();
+                        selectedNonRootNodes.forEach((n) => {
+                            toDelete.add(n.id);
+                            collectDescendants(n.id, edges).forEach((id) => toDelete.add(id));
+                        });
+                        const nextNodes = nodes.filter((n) => !toDelete.has(n.id));
+                        const nextEdges = edges.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target));
+                        setEdges(nextEdges);
+                        setNodes(reLayout(nextNodes, nextEdges));
+                    },
+                };
+                return [nodeUndoAction, nodeRedoAction, addChildAction, copyAction, pasteNodeAction, newNodeAction, batchDeleteAction];
+            }
+
             const deleteAction: ContextMenuAction = {
                 label: '删除节点（含子节点）',
                 icon: <TrashIcon />,

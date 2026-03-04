@@ -5,7 +5,7 @@ export type NodeSide = 'left' | 'right';
 
 const H_GAP = 220; // 水平节点间距
 const V_GAP = 70;  // 垂直节点间距
-const NODE_H = 40; // 估算节点高度
+const NODE_H = 40; // 默认高度（无 measured 时的克驱値）
 
 /** 构建从 nodeId  childrenIds 的邻接表（仅层级边） */
 function buildTree(nodes: Node[], edges: Edge[]): Map<string, string[]> {
@@ -21,17 +21,22 @@ function buildTree(nodes: Node[], edges: Edge[]): Map<string, string[]> {
 
 /**
  * 计算子树占用的垂直高度：
- * - 无子节点  NODE_H
- * - 1 个子节点  与父节点同 Y，高度 = 子树高度
+ * - 无子节点  该节点实际测量高度（降级为 NODE_H）
+ * - 1 个子节点  与父节点同 Y，高度 = max(自身高, 子树高)
  * - 多子节点  各子树高度之和 + 间距
+ * heightMap: 每个节点的实际测量高度
  */
-function makeSubtreeHeight(childrenMap: Map<string, string[]>) {
+function makeSubtreeHeight(
+  childrenMap: Map<string, string[]>,
+  heightMap: Map<string, number>,
+) {
   function subtreeHeight(nodeId: string): number {
+    const selfH = heightMap.get(nodeId) ?? NODE_H;
     const children = childrenMap.get(nodeId) ?? [];
-    if (children.length === 0) return NODE_H;
-    if (children.length === 1) return subtreeHeight(children[0]);
+    if (children.length === 0) return selfH;
+    if (children.length === 1) return Math.max(selfH, subtreeHeight(children[0]));
     const total = children.reduce((s, c) => s + subtreeHeight(c) + V_GAP, 0) - V_GAP;
-    return Math.max(NODE_H, total);
+    return Math.max(selfH, total);
   }
   return subtreeHeight;
 }
@@ -42,6 +47,7 @@ function makePlaceSubtree(
   subtreeHeight: (id: string) => number,
   posMap: Map<string, { x: number; y: number }>,
   sideMap: Map<string, NodeSide>,
+  heightMap: Map<string, number>,
 ) {
   function place(nodeId: string, cx: number, cy: number, direction: NodeSide) {
     posMap.set(nodeId, { x: cx, y: cy });
@@ -52,8 +58,13 @@ function makePlaceSubtree(
     const childX = direction === 'right' ? cx + H_GAP : cx - H_GAP;
 
     if (children.length === 1) {
-      // 单子节点：保持同 Y，直连直线
-      place(children[0], childX, cy, direction);
+      // 单子节点：保持父子中心对齐，确保连线水平
+      // cy 是当前节点的 top-left Y，需要计算子节点的 top-left Y
+      // 使得子节点的中心 Y 与父节点的中心 Y 对齐
+      const parentH = heightMap.get(nodeId) ?? NODE_H;
+      const childH = heightMap.get(children[0]) ?? NODE_H;
+      const alignedY = cy + (parentH - childH) / 2;
+      place(children[0], childX, alignedY, direction);
       return;
     }
 
@@ -74,6 +85,16 @@ function makePlaceSubtree(
  * 优先读取节点的 data.side 固定已有节点方向；
  * 没有 side 的新节点默认放右侧。
  */
+/** 从 nodes 数组构建 节点实际高度映射（优先用 React Flow 的 measured.height） */
+function buildHeightMap(nodes: Node[]): Map<string, number> {
+  const m = new Map<string, number>();
+  nodes.forEach((n) => {
+    const h = (n.measured as { width?: number; height?: number } | undefined)?.height;
+    m.set(n.id, typeof h === 'number' && h > 0 ? h : NODE_H);
+  });
+  return m;
+}
+
 function layoutMindmap(
   rootId: string,
   nodes: Node[],
@@ -82,8 +103,9 @@ function layoutMindmap(
   const childrenMap = buildTree(nodes, edges);
   const posMap = new Map<string, { x: number; y: number }>();
   const sideMap = new Map<string, NodeSide>();
-  const subtreeHeight = makeSubtreeHeight(childrenMap);
-  const place = makePlaceSubtree(childrenMap, subtreeHeight, posMap, sideMap);
+  const heightMap = buildHeightMap(nodes);
+  const subtreeHeight = makeSubtreeHeight(childrenMap, heightMap);
+  const place = makePlaceSubtree(childrenMap, subtreeHeight, posMap, sideMap, heightMap);
 
   // 根节点本身放在原点
   posMap.set(rootId, { x: 0, y: 0 });
@@ -91,6 +113,7 @@ function layoutMindmap(
 
   const nodeDataMap = new Map(nodes.map((n) => [n.id, n.data]));
   const rootChildren = childrenMap.get(rootId) ?? [];
+  const rootH = heightMap.get(rootId) ?? NODE_H;
 
   // 分组：已有 side 的固定；没有 side 的，偶数索引右，奇数索引左
   const rightChildren: string[] = [];
@@ -116,7 +139,9 @@ function layoutMindmap(
 
   // 放置右侧分支
   if (rightChildren.length === 1) {
-    place(rightChildren[0], H_GAP, 0, 'right');
+    const childH = heightMap.get(rightChildren[0]) ?? NODE_H;
+    // 单子节点：子节点中心 Y 对齐根节点中心 Y
+    place(rightChildren[0], H_GAP, (rootH - childH) / 2, 'right');
   } else if (rightChildren.length > 1) {
     const totalH = rightChildren.reduce((s, c) => s + subtreeHeight(c) + V_GAP, 0) - V_GAP;
     let startY = -totalH / 2;
@@ -129,7 +154,9 @@ function layoutMindmap(
 
   // 放置左侧分支
   if (leftChildren.length === 1) {
-    place(leftChildren[0], -H_GAP, 0, 'left');
+    const childH = heightMap.get(leftChildren[0]) ?? NODE_H;
+    // 单子节点：子节点中心 Y 对齐根节点中心 Y
+    place(leftChildren[0], -H_GAP, (rootH - childH) / 2, 'left');
   } else if (leftChildren.length > 1) {
     const totalH = leftChildren.reduce((s, c) => s + subtreeHeight(c) + V_GAP, 0) - V_GAP;
     let startY = -totalH / 2;
@@ -152,8 +179,9 @@ function layoutTreeLR(
   const childrenMap = buildTree(nodes, edges);
   const posMap = new Map<string, { x: number; y: number }>();
   const sideMap = new Map<string, NodeSide>();
-  const subtreeHeight = makeSubtreeHeight(childrenMap);
-  const place = makePlaceSubtree(childrenMap, subtreeHeight, posMap, sideMap);
+  const heightMap = buildHeightMap(nodes);
+  const subtreeHeight = makeSubtreeHeight(childrenMap, heightMap);
+  const place = makePlaceSubtree(childrenMap, subtreeHeight, posMap, sideMap, heightMap);
   place(rootId, 0, 0, 'right');
   return { posMap, sideMap };
 }
@@ -207,28 +235,39 @@ export function applyLayout(
   });
 }
 
-/** 找出离给定点最近的节点（排除自身），用于拖拽吸附检测 */
-export function findNearestNode(
+/**
+ * 基于包围盒碰撞检测，找出与被拖拽节点真实接触（边框重叠）的目标节点（排除自身）。
+ * 动态读取节点的 measured 宽高，兼容编辑后尺寸变化的节点。
+ * 类似游戏碰撞逻辑：接触立即触发，脱离立即取消。
+ */
+export function findCollidingNode(
   nodes: Node[],
   dragNodeId: string,
-  dragPosition: { x: number; y: number },
-  threshold = 100,
+  draggedNode: Node,
 ): string | null {
-  let nearestId: string | null = null;
-  let minDist = threshold;
+  const dw = (draggedNode.measured as { width?: number } | undefined)?.width ?? 80;
+  const dh = (draggedNode.measured as { height?: number } | undefined)?.height ?? 40;
+  const dx1 = draggedNode.position.x;
+  const dy1 = draggedNode.position.y;
+  const dx2 = dx1 + dw;
+  const dy2 = dy1 + dh;
 
-  nodes.forEach((n) => {
-    if (n.id === dragNodeId) return;
-    const dx = n.position.x - dragPosition.x;
-    const dy = n.position.y - dragPosition.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < minDist) {
-      minDist = dist;
-      nearestId = n.id;
+  for (const n of nodes) {
+    if (n.id === dragNodeId || n.hidden) continue;
+    const nw = (n.measured as { width?: number } | undefined)?.width ?? 80;
+    const nh = (n.measured as { height?: number } | undefined)?.height ?? 40;
+    const nx1 = n.position.x;
+    const ny1 = n.position.y;
+    const nx2 = nx1 + nw;
+    const ny2 = ny1 + nh;
+
+    // 包围盒重叠：两个矩形的边框相交即触发
+    if (dx1 < nx2 && dx2 > nx1 && dy1 < ny2 && dy2 > ny1) {
+      return n.id;
     }
-  });
+  }
 
-  return nearestId;
+  return null;
 }
 
 /** 找到树的根节点 */

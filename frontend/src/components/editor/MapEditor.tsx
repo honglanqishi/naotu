@@ -30,7 +30,7 @@ import { ContextMenu, type ContextMenuAction } from '@/components/editor/Context
 import {
     calculateLayout,
     applyLayout,
-    findNearestNode,
+    findCollidingNode,
     findRootId,
     type LayoutStyle,
 } from '@/lib/layoutUtils';
@@ -249,10 +249,10 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         [screenToFlowPosition, createNode, setNodes],
     );
 
-    // 拖拽过程：检测吸附目标（通过 ref 读取最新 nodes，避免重建回调）
+    // 拖拽过程：基于包围盒碰撞检测吸附目标（动态读取 measured 尺寸，触碰即触发）
     const onNodeDrag = useCallback(
         (_e: React.MouseEvent, draggedNode: Node) => {
-            const nearest = findNearestNode(nodesRef.current, draggedNode.id, draggedNode.position, 100);
+            const nearest = findCollidingNode(nodesRef.current, draggedNode.id, draggedNode);
 
             if (nearest !== dropTargetRef.current) {
                 if (dropTargetRef.current) {
@@ -436,6 +436,15 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         return () => container?.removeEventListener('keydown', handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reLayout, setNodes, setEdges, undo, redo, pushHistory, setClipboard]); // 不依赖 nodes/edges，通过 ref 读取最新值
+
+    // ─── 监听节点编辑提交事件，触发重新布局（节点尺寸可能已因内容变化而改变） ────────
+    useEffect(() => {
+        const handleCommitEdit = () => {
+            setNodes((nds) => reLayout(nds, edgesRef.current));
+        };
+        document.addEventListener('mindnode:commitEdit', handleCommitEdit);
+        return () => document.removeEventListener('mindnode:commitEdit', handleCommitEdit);
+    }, [setNodes, reLayout]);
 
     // ─── 在 document 上监听 mousemove，确保不丢失移动事件（比 div onMouseMove 更可靠） ──
     useEffect(() => {

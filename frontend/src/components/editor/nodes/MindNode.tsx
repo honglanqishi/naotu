@@ -1,10 +1,14 @@
 'use client';
 
-import { memo, useCallback, useRef, useState, useEffect, useMemo } from 'react';
+import { memo, useCallback, useRef, useState, useEffect, useLayoutEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Handle, Position, useReactFlow, useEdges, type NodeProps } from '@xyflow/react';
 
 export interface MindNodeData extends Record<string, unknown> {
+  /** 纯文本内容（用于布局计算、旧节点兼容、搜索等） */
   label: string;
+  /** 富文本 HTML 内容（可选，存在时优先用于展示） */
+  html?: string;
   isRoot?: boolean;
   isDropTarget?: boolean;
   /** 节点所在侧：left = 父节点在右边，right = 父节点在左边（默认） */
@@ -13,7 +17,16 @@ export interface MindNodeData extends Record<string, unknown> {
   collapsed?: boolean;
 }
 
-/** 节点状态机: normal → selected → editing → normal */
+/** 将纯文本安全转义为内联 HTML（保留换行） */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
+
+/** 节点状态机: normal → editing → normal */
 type EditState = 'normal' | 'editing';
 
 export function MindNodeComponent({ id, data, selected }: NodeProps) {
@@ -21,7 +34,14 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
   const { updateNodeData } = useReactFlow();
   const allEdges = useEdges();
   const [editState, setEditState] = useState<EditState>('normal');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  // ── 图片全屏预览状态 ─────────────────────────────────────────
+  const [fullscreenImg, setFullscreenImg] = useState<string | null>(null);
+  const [imgOffset, setImgOffset] = useState({ x: 0, y: 0 });
+  const [isDraggingImg, setIsDraggingImg] = useState(false);
+  const isDraggingImgRef = useRef(false);
+  const imgDragRef = useRef({ startX: 0, startY: 0, startOffX: 0, startOffY: 0 });
 
   // 计算该节点是否有子节点（层级连接）
   // 使用 useEdges 保持响应式，边变化时自动更新
@@ -32,7 +52,161 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
 
   const collapsed = !!nodeData.collapsed;
 
-  /** 折叠/展开切换 */
+  /** 当前节点应展示的 HTML（优先 html 字段，降级为转义后的纯文本） */
+  const displayHtml = nodeData.html ?? escapeHtml(nodeData.label);
+
+  // ── 非编辑态时同步 innerHTML（useLayoutEffect 避免闪烁） ──────────────────
+  useLayoutEffect(() => {
+    if (editState === 'normal' && editorRef.current) {
+      editorRef.current.innerHTML = displayHtml;
+    }
+  }, [editState, displayHtml]);
+
+  // ── 进入编辑态：聚焦 → 全选文本 ────────────────────────────────────────
+  useEffect(() => {
+    if (editState === 'editing' && editorRef.current) {
+      editorRef.current.focus();
+      // 进入编辑态时全选文本，方便用户直接覆盖输入
+      const range = document.createRange();
+      range.selectNodeContents(editorRef.current);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
+  }, [editState]);
+
+  // ── 图片全屏预览：Esc 关闭 + 全局拖拽追踪 ───────────────────
+  useEffect(() => {
+    if (!fullscreenImg) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setFullscreenImg(null);
+        setImgOffset({ x: 0, y: 0 });
+      }
+    };
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingImgRef.current) return;
+      setImgOffset({
+        x: imgDragRef.current.startOffX + e.clientX - imgDragRef.current.startX,
+        y: imgDragRef.current.startOffY + e.clientY - imgDragRef.current.startY,
+      });
+    };
+    const handleMouseUp = () => {
+      isDraggingImgRef.current = false;
+      setIsDraggingImg(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [fullscreenImg]);
+
+  /** 提交编辑：保存 HTML + 提取纯文本 label，并通知 MapEditor 触发布局刷新 */
+  const commitEdit = useCallback(() => {
+    if (!editorRef.current) return;
+    const newHtml = editorRef.current.innerHTML;
+    const newLabel = (editorRef.current.innerText ?? '').trim() || nodeData.label;
+    updateNodeData(id, { label: newLabel, html: newHtml });
+    setEditState('normal');
+    // 节点内容可能导致尺寸变化，等待 ReactFlow 重新测量后再触发重新布局
+    setTimeout(() => {
+      document.dispatchEvent(new CustomEvent('mindnode:commitEdit'));
+    }, 80);
+  }, [id, nodeData.label, updateNodeData]);
+
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+
+      // 非编辑态下双击图片 → 全屏预览
+      if (editState === 'normal') {
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'IMG') {
+          const src = (target as HTMLImageElement).src;
+          setFullscreenImg(src);
+          setImgOffset({ x: 0, y: 0 });
+          return;
+        }
+      }
+
+      if (editState === 'editing') {
+        // 编辑态下双击 → 全选文本
+        if (editorRef.current) {
+          const range = document.createRange();
+          range.selectNodeContents(editorRef.current);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }
+        return;
+      }
+      setEditState('editing');
+    },
+    [editState],
+  );
+
+  const handleBlur = useCallback(() => {
+    if (editState === 'editing') {
+      commitEdit();
+    }
+  }, [editState, commitEdit]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      // 必须阻止冒泡：防止画布键盘快捷键（Tab/Delete/Ctrl+Z 等）在编辑态误触发
+      e.stopPropagation();
+
+      // Enter：提交并退出编辑；Alt+Enter：插入换行
+      if (e.key === 'Enter') {
+        if (e.altKey) {
+          // Alt+Enter：论入换行符
+          e.preventDefault();
+          // eslint-disable-next-line @typescript-eslint/no-deprecated
+          document.execCommand('insertLineBreak', false);
+          return;
+        }
+        // 普通 Enter：提交并退出编辑
+        e.preventDefault();
+        commitEdit();
+        return;
+      }
+
+      // Escape：保持内容提交并退出编辑，同时刺激布局刷新
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        commitEdit();
+        return;
+      }
+
+      // ── 富文本格式化快捷键（Ctrl+B/I/U） ────────────────────────────────
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key.toLowerCase()) {
+          case 'b':
+            e.preventDefault();
+            // eslint-disable-next-line @typescript-eslint/no-deprecated
+            document.execCommand('bold', false);
+            return;
+          case 'i':
+            e.preventDefault();
+            // eslint-disable-next-line @typescript-eslint/no-deprecated
+            document.execCommand('italic', false);
+            return;
+          case 'u':
+            e.preventDefault();
+            // eslint-disable-next-line @typescript-eslint/no-deprecated
+            document.execCommand('underline', false);
+            return;
+          // Ctrl+C/V/Z 交给浏览器默认行为（contentEditable 内部剪贴板/撤销）
+        }
+      }
+    },
+    [commitEdit],
+  );
+
   const handleToggleCollapse = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -40,58 +214,6 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
       updateNodeData(id, { collapsed: !collapsed });
     },
     [id, collapsed, updateNodeData],
-  );
-
-  // 进入编辑态时自动聚焦 input
-  useEffect(() => {
-    if (editState === 'editing' && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [editState]);
-
-  const handleDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
-      // 阻止冒泡：防止外层 div 的 onDoubleClick（新建浮动节点）被触发
-      e.stopPropagation();
-      setEditState('editing');
-    },
-    [],
-  );
-
-  // 单击不阻止冒泡，让 ReactFlow 正常处理节点选中（边框高亮依赖 selected prop）
-  const handleClick = useCallback((_e: React.MouseEvent) => {}, []);
-
-  const commitEdit = useCallback(
-    (value: string) => {
-      const trimmed = value.trim() || nodeData.label;
-      updateNodeData(id, { label: trimmed });
-      setEditState('normal');
-    },
-    [id, nodeData.label, updateNodeData],
-  );
-
-  const handleBlur = useCallback(
-    (e: React.FocusEvent<HTMLInputElement>) => {
-      commitEdit(e.target.value);
-    },
-    [commitEdit],
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        commitEdit(e.currentTarget.value);
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setEditState('normal');
-      }
-      // 阻止冒泡，防止触发画布快捷键（如 Tab/Delete）
-      e.stopPropagation();
-    },
-    [commitEdit],
   );
 
   const isRoot = nodeData.isRoot;
@@ -117,13 +239,15 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
         />
       )}
 
-      {/* 节点主体 */}
+      {/* 节点主体（尺寸随内容自动撑开） */}
+      {/* 编辑态加 nodrag nopan，防止 ReactFlow 拦截鼠标，确保文本可自由选取 */}
       <div
-        onClick={handleClick}
         onDoubleClick={handleDoubleClick}
+        className={editState === 'editing' ? 'nodrag nopan' : undefined}
         style={{
-          minWidth: isRoot ? 100 : 80,
-          maxWidth: 240,
+          minWidth: isRoot ? 120 : 80,
+          maxWidth: 300,
+          minHeight: isRoot ? 36 : 28,
           padding: isRoot ? '8px 20px' : '6px 14px',
           borderRadius: isRoot ? 20 : 12,
           background: isRoot
@@ -145,48 +269,42 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
                 : '0 2px 8px rgba(0,0,0,0.3)',
           transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
           cursor: editState === 'editing' ? 'text' : 'default',
-          userSelect: 'none',
+          userSelect: editState === 'editing' ? 'text' : 'none',
+          position: 'relative',
+          overflow: 'visible',
+          boxSizing: 'border-box',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          position: 'relative',
-          overflow: 'visible',
         }}
       >
-        {editState === 'editing' ? (
-          <input
-            ref={inputRef}
-            defaultValue={nodeData.label}
-            onBlur={handleBlur}
-            onKeyDown={handleKeyDown}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              color: isRoot ? 'white' : 'var(--foreground)',
-              fontSize: isRoot ? 14 : 13,
-              fontWeight: isRoot ? 600 : 400,
-              width: '100%',
-              textAlign: 'center',
-              minWidth: 60,
-            }}
-          />
-        ) : (
-          <span
-            style={{
-              color: isRoot ? 'white' : 'var(--foreground)',
-              fontSize: isRoot ? 14 : 13,
-              fontWeight: isRoot ? 600 : 400,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              textAlign: 'center',
-              display: 'block',
-            }}
-          >
-            {nodeData.label}
-          </span>
-        )}
+        {/*
+         * 富文本编辑区（展示和编辑共用同一 div，避免状态切换闪烁）
+         * - 非编辑态：contentEditable=false，内容由 useLayoutEffect 通过 innerHTML 管理
+         * - 编辑态：contentEditable=true，内容由浏览器接管，React 不干预
+         * suppressContentEditableWarning 抑制 React 的 children 警告
+         * 支持格式化：Ctrl+B 加粗、Ctrl+I 斜体、Ctrl+U 下划线、Enter 换行、Escape 取消
+         */}
+        <div
+          ref={editorRef}
+          contentEditable={editState === 'editing'}
+          suppressContentEditableWarning
+          onBlur={handleBlur}
+          onKeyDown={handleKeyDown}
+          onClick={editState === 'editing' ? (e) => e.stopPropagation() : undefined}
+          style={{
+            outline: 'none',
+            color: isRoot ? 'white' : 'var(--foreground)',
+            fontSize: isRoot ? 14 : 13,
+            fontWeight: isRoot ? 600 : 400,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            lineHeight: 1.5,
+            textAlign: editState === 'editing' ? 'left' : 'center',
+            cursor: 'inherit',
+            width: '100%',
+          }}
+        />
 
         {/* 吸附指示环 */}
         {isDropTarget && (
@@ -202,15 +320,14 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
           />
         )}
 
-        {/* 折叠/展开按钮：仅在有子节点时显示 */}
-        {hasChildren && (
+        {/* 折叠/展开按钮：仅在有子节点且非编辑态时显示 */}
+        {hasChildren && editState === 'normal' && (
           <div
             className="nodrag nopan"
             onClick={handleToggleCollapse}
             title={collapsed ? '展开子节点' : '折叠子节点'}
             style={{
               position: 'absolute',
-              // 根据节点方向决定按钮位置（源连接一侧）
               [isLeftSide ? 'left' : 'right']: -22,
               top: '50%',
               transform: 'translateY(-50%)',
@@ -235,7 +352,6 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
               boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
             }}
           >
-            {/* 折叠时显示 ▶，展开时显示 ▼（根据方向镜像） */}
             <svg
               width="7"
               height="7"
@@ -265,6 +381,51 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
           border: '2px solid rgba(255,255,255,0.3)',
         }}
       />
+
+      {/* 图片全屏预览 Portal：可拖动、Esc 关闭、点击功画外关闭 */}
+      {fullscreenImg && typeof document !== 'undefined' && createPortal(
+        <div
+          onClick={() => { setFullscreenImg(null); setImgOffset({ x: 0, y: 0 }); }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            background: 'rgba(0, 0, 0, 0.88)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            alt="fullscreen-preview"
+            src={fullscreenImg}
+            draggable={false}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              isDraggingImgRef.current = true;
+              setIsDraggingImg(true);
+              imgDragRef.current = {
+                startX: e.clientX,
+                startY: e.clientY,
+                startOffX: imgOffset.x,
+                startOffY: imgOffset.y,
+              };
+            }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 'none',
+              maxHeight: 'none',
+              transform: `translate(${imgOffset.x}px, ${imgOffset.y}px)`,
+              cursor: isDraggingImg ? 'grabbing' : 'grab',
+              userSelect: 'none',
+              display: 'block',
+            }}
+          />
+        </div>,
+        document.body,
+      )}
     </>
   );
 }
@@ -272,16 +433,15 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
 /**
  * 用 React.memo 包装，自定义比较函数：
  * 仅当 id / data / selected 真正变化时才重渲染。
- * 如此，拖拽其他节点时不会触发不相关节点的重渲染。
  */
 export const MindNode = memo(MindNodeComponent, (prev, next) => {
   if (prev.id !== next.id) return false;
   if (prev.selected !== next.selected) return false;
-  // data 是普通对象，做浅对比（label / isRoot / isDropTarget / side / collapsed）
   const pd = prev.data as MindNodeData;
   const nd = next.data as MindNodeData;
   return (
     pd.label === nd.label &&
+    pd.html === nd.html &&
     pd.isRoot === nd.isRoot &&
     pd.isDropTarget === nd.isDropTarget &&
     pd.side === nd.side &&

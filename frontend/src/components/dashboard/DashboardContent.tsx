@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { useSession, signOut } from '@/lib/auth-client';
@@ -306,6 +306,23 @@ function MapCard({
     onDelete: () => void;
 }) {
     const [showMenu, setShowMenu] = useState(false);
+    // Click-Away：点击菜单按钮或下拉菜单区域之外时自动关闭
+    const menuRef = useRef<HTMLDivElement>(null);
+    const btnRef = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+        if (!showMenu) return;
+        const handleClickAway = (e: MouseEvent) => {
+            const target = e.target as Node;
+            if (
+                menuRef.current && !menuRef.current.contains(target) &&
+                btnRef.current && !btnRef.current.contains(target)
+            ) {
+                setShowMenu(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickAway);
+        return () => document.removeEventListener('mousedown', handleClickAway);
+    }, [showMenu]);
     const accentColor = getAccentColor(map.id);
     const tileLabel = getTileLabel(map.title);
 
@@ -355,6 +372,7 @@ function MapCard({
 
             {/* 菜单按钮（hover 显示） */}
             <button
+                ref={btnRef}
                 className="absolute top-2 right-2 w-6 h-6 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
                 style={{ background: 'rgba(0,0,0,0.5)' }}
                 onClick={(e) => {
@@ -372,6 +390,7 @@ function MapCard({
             {/* 下拉菜单 */}
             {showMenu && (
                 <div
+                    ref={menuRef}
                     className="absolute top-8 right-2 z-20 rounded-lg border py-1 shadow-lg"
                     style={{ background: '#2a2a2a', borderColor: 'rgba(255,255,255,0.12)', minWidth: '100px' }}
                     onClick={(e) => e.stopPropagation()}

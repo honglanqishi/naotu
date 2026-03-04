@@ -60,10 +60,10 @@ interface ContextMenuState {
     nodeId?: string;
 }
 
-// ─── 全局唯一 ID 生成器（避免 Date.now() 在同一 tick 内重复） ──────────────────
-let _idCounter = 0;
+// ─── 全局唯一 ID 生成器（UUIDv4，彻底避免多端/快速操作导致的 ID 碰撞） ────────
 function genId(prefix: string) {
-    return `${prefix}-${Date.now()}-${++_idCounter}`;
+    // crypto.randomUUID() 在浏览器原生可用，无需额外依赖
+    return `${prefix}-${crypto.randomUUID()}`;
 }
 
 // ─── 递归收集子孙节点 ID ───────────────────────────────────────────────────────
@@ -127,6 +127,8 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     const initializedRef = useRef(false);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [layoutStyle] = useState<LayoutStyle>('mindmap');
+    /** 节点剪贴板：存储 Ctrl+C 复制的节点，用于 Ctrl+V 粘贴 */
+    const [clipboard, setClipboard] = useState<Node[]>([]);
     const containerRef = useRef<HTMLDivElement>(null);
     const dropTargetRef = useRef<string | null>(null);
     // 追踪右键是否发生拖拽（平移），避免平移后弹出右键菜单
@@ -304,7 +306,11 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 type: 'hierarchyEdge',
             };
 
-            const nextEdges = [...edgesRef.current, newEdge];
+            // 移除被拖拽节点的旧父子层级边，再挂到新父节点下，避免出现三角/多父关系
+            const filteredEdges = edgesRef.current.filter(
+                (e) => !(e.type === 'hierarchyEdge' && e.target === draggedNode.id),
+            );
+            const nextEdges = [...filteredEdges, newEdge];
             setEdges(nextEdges);
             setNodes((nds) => reLayout(nds, nextEdges));
         },
@@ -329,6 +335,44 @@ function MapEditorInner({ mapId }: { mapId: string }) {
             if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
                 e.preventDefault();
                 redo();
+                return;
+            }
+
+            // ── Ctrl+C：复制选中节点到剪贴板 ────────────────────────────
+            if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+                const selected = nodes.filter((n) => n.selected);
+                if (selected.length === 0) return;
+                setClipboard(selected);
+                toast.success(`已复制 ${selected.length} 个节点`);
+                return;
+            }
+
+            // ── Ctrl+V：粘贴剪贴板中的节点 ──────────────────────────────
+            if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+                // 如果焦点在输入框里，让输入框自己处理粘贴
+                if (
+                    document.activeElement instanceof HTMLInputElement ||
+                    document.activeElement instanceof HTMLTextAreaElement ||
+                    (document.activeElement as HTMLElement)?.isContentEditable
+                ) return;
+                setClipboard((cb) => {
+                    if (cb.length === 0) return cb;
+                    e.preventDefault();
+                    pushHistory();
+                    const offset = 40;
+                    const newNodes = cb.map((n) => ({
+                        ...n,
+                        id: genId('node'),
+                        position: { x: n.position.x + offset, y: n.position.y + offset },
+                        data: { ...n.data, isRoot: false },
+                        selected: true,
+                    }));
+                    setNodes((nds) => [
+                        ...nds.map((n) => ({ ...n, selected: false })),
+                        ...newNodes,
+                    ]);
+                    return cb; // 保持剪贴板内容，允许多次粘贴
+                });
                 return;
             }
 
@@ -359,12 +403,13 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 return;
             }
 
-            // ── Delete / Backspace：删除选中节点（跳过根节点和编辑中的输入框） ──
+            // ── Delete / Backspace：删除选中节点（跳过根节点和编辑中的输入框/富文本框） ──
             if (e.key === 'Delete' || e.key === 'Backspace') {
-                // 如果焦点在输入框里，让输入框自己处理
+                // 如果焦点在输入框或富文本编辑区里，让编辑区自己处理，不触发节点删除
                 if (
                     document.activeElement instanceof HTMLInputElement ||
-                    document.activeElement instanceof HTMLTextAreaElement
+                    document.activeElement instanceof HTMLTextAreaElement ||
+                    (document.activeElement as HTMLElement)?.isContentEditable
                 ) return;
 
                 const selectedNodes = nodes.filter((n) => n.selected && !n.data?.isRoot);
@@ -390,7 +435,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         container?.addEventListener('keydown', handleKeyDown);
         return () => container?.removeEventListener('keydown', handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [reLayout, setNodes, setEdges, undo, redo, pushHistory]); // 不依赖 nodes/edges，通过 ref 读取最新值
+    }, [reLayout, setNodes, setEdges, undo, redo, pushHistory, setClipboard]); // 不依赖 nodes/edges，通过 ref 读取最新值
 
     // ─── 在 document 上监听 mousemove，确保不丢失移动事件（比 div onMouseMove 更可靠） ──
     useEffect(() => {
@@ -406,12 +451,26 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         return () => document.removeEventListener('mousemove', handleMouseMove);
     }, []);
 
+    // ─── 用原生事件监听 mousedown，确保在 ReactFlow 可能的 stopPropagation 之前捕获 ──
+    // React synthetic event 的 stopPropagation 不会阻止原生 document 监听器
+    useEffect(() => {
+        const handleNativeMouseDown = (e: MouseEvent) => {
+            if (e.button === 2) {
+                rightDragRef.current = { startX: e.clientX, startY: e.clientY, moved: false };
+            }
+        };
+        const container = containerRef.current;
+        container?.addEventListener('mousedown', handleNativeMouseDown);
+        return () => container?.removeEventListener('mousedown', handleNativeMouseDown);
+    }, []);
+
     // 右键菜单：禁用浏览器默认菜单
     const onContextMenu = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
-        // 若右键拖拽了（平移画布），则不弹出菜单，同时阻止冒泡
-        if (rightDragRef.current.moved) {
-            e.stopPropagation();
+        // 双重验证：moved 标志 OR 实际偏移距离 > 3px，只要满足任一条件就认定为拖拽平移，不弹菜单
+        const dx = e.clientX - rightDragRef.current.startX;
+        const dy = e.clientY - rightDragRef.current.startY;
+        if (rightDragRef.current.moved || Math.sqrt(dx * dx + dy * dy) > 3) {
             return;
         }
         const nodeEl = (e.target as HTMLElement).closest('[data-id]');
@@ -459,23 +518,39 @@ function MapEditorInner({ mapId }: { mapId: string }) {
             };
 
             const copyAction: ContextMenuAction = {
-                label: '复制节点',
+                label: '复制',
                 icon: <CopyIcon />,
+                shortcut: 'Ctrl+C',
                 onClick: () => {
-                    pushHistory();
                     const original = nodes.find((n) => n.id === targetNodeId);
                     if (!original) return;
+                    setClipboard([original]);
+                    toast.success('已复制节点');
+                },
+            };
+
+            const pasteNodeAction: ContextMenuAction = {
+                label: '粘贴',
+                icon: <PasteIcon />,
+                shortcut: 'Ctrl+V',
+                disabled: clipboard.length === 0,
+                onClick: () => {
+                    if (clipboard.length === 0) return;
+                    pushHistory();
+                    const offset = 40;
+                    const newNodes = clipboard.map((n) => ({
+                        ...n,
+                        id: genId('node'),
+                        position: { x: n.position.x + offset, y: n.position.y + offset },
+                        data: { ...n.data, isRoot: false },
+                        selected: true,
+                    }));
                     setNodes((nds) => [
-                        ...nds,
-                        {
-                            ...original,
-                            id: genId('node'),
-                            position: { x: original.position.x + 40, y: original.position.y + 40 },
-                            data: { ...original.data, isRoot: false },
-                            selected: false,
-                        },
+                        ...nds.map((n) => ({ ...n, selected: false })),
+                        ...newNodes,
                     ]);
                 },
+                dividerAfter: true,
             };
 
             const newNodeAction: ContextMenuAction = {
@@ -485,25 +560,26 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                     pushHistory();
                     setNodes((nds) => [...nds, createNode(flowPos)]);
                 },
-                dividerAfter: !isRoot,
             };
 
             // 撤销/重做选项（除了删除节点内部已 pushHistory）
             const nodeUndoAction: ContextMenuAction = {
                 label: historyRef.current.length > 0 ? `撤销 (${historyRef.current.length})` : '撤销',
                 icon: <UndoIcon />,
+                shortcut: 'Ctrl+Z',
                 onClick: undo,
             };
             const nodeRedoAction: ContextMenuAction = {
                 label: futureRef.current.length > 0 ? `重做 (${futureRef.current.length})` : '重做',
                 icon: <RedoIcon />,
+                shortcut: 'Ctrl+Y',
                 onClick: redo,
                 dividerAfter: true,
             };
 
             // 根节点不显示删除选项
             if (isRoot) {
-                return [nodeUndoAction, nodeRedoAction, addChildAction, copyAction, newNodeAction];
+                return [nodeUndoAction, nodeRedoAction, addChildAction, copyAction, pasteNodeAction, newNodeAction];
             }
 
             const deleteAction: ContextMenuAction = {
@@ -523,7 +599,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 },
             };
 
-            return [nodeUndoAction, nodeRedoAction, addChildAction, copyAction, newNodeAction, deleteAction];
+            return [nodeUndoAction, nodeRedoAction, addChildAction, copyAction, pasteNodeAction, newNodeAction, deleteAction];
         }
 
         // ── 右键点击空白区域 ──────────────────────────────────────────────
@@ -541,14 +617,39 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         const undoAction: ContextMenuAction = {
             label: historyRef.current.length > 0 ? `撤销 (${historyRef.current.length})` : '撤销',
             icon: <UndoIcon />,
+            shortcut: 'Ctrl+Z',
             onClick: undo,
             dividerAfter: true,
         };
         const redoAction: ContextMenuAction = {
             label: futureRef.current.length > 0 ? `重做 (${futureRef.current.length})` : '重做',
             icon: <RedoIcon />,
+            shortcut: 'Ctrl+Y',
             onClick: redo,
             dividerAfter: true,
+        };
+
+        // 空白区域的粘贴：在右键点击位置粘贴
+        const pasteAtPosAction: ContextMenuAction = {
+            label: '粘贴',
+            icon: <PasteIcon />,
+            shortcut: 'Ctrl+V',
+            disabled: clipboard.length === 0,
+            onClick: () => {
+                if (clipboard.length === 0) return;
+                pushHistory();
+                const newNodes = clipboard.map((n, i) => ({
+                    ...n,
+                    id: genId('node'),
+                    position: { x: flowPos.x + i * 20, y: flowPos.y + i * 20 },
+                    data: { ...n.data, isRoot: false },
+                    selected: true,
+                }));
+                setNodes((nds) => [
+                    ...nds.map((n) => ({ ...n, selected: false })),
+                    ...newNodes,
+                ]);
+            },
         };
 
         // 若有多个选中节点，补充批量操作
@@ -570,11 +671,11 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                     setNodes(reLayout(nextNodes, nextEdges));
                 },
             };
-            return [undoAction, redoAction, newNodeAction, deleteSelectedAction];
+            return [undoAction, redoAction, newNodeAction, pasteAtPosAction, deleteSelectedAction];
         }
 
-        return [undoAction, redoAction, newNodeAction];
-    }, [contextMenu, nodes, edges, setNodes, setEdges, createNode, reLayout, screenToFlowPosition, pushHistory, undo, redo]);
+        return [undoAction, redoAction, newNodeAction, pasteAtPosAction];
+    }, [contextMenu, nodes, edges, clipboard, setNodes, setEdges, setClipboard, createNode, reLayout, screenToFlowPosition, pushHistory, undo, redo]);
 
     // ─── 折叠：计算需要隐藏的节点/边（不修改 nodes 状态,仅影响渲染） ──────────
     // 无折叠节点时返回稳定空集合（EMPTY_ID_SET），避免 displayNodes memo 因新 Set 引用而失效
@@ -627,12 +728,6 @@ function MapEditorInner({ mapId }: { mapId: string }) {
             className="w-full h-screen flex flex-col outline-none"
             style={{ background: '#0f0f17' }}
             tabIndex={-1}
-            onMouseDown={(e) => {
-                // 追踪右键按下位置，用于判断是否发生了平移拖拽
-                if (e.button === 2) {
-                    rightDragRef.current = { startX: e.clientX, startY: e.clientY, moved: false };
-                }
-            }}
         >
             {/* 顶栏 */}
             <header
@@ -675,6 +770,14 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 className="flex-1"
                 onContextMenu={onContextMenu}
                 onDoubleClick={onCanvasDoubleClick}
+                onMouseDown={(e) => {
+                    // 点击画布任意区域（非富文本编辑框/输入框）时，将焦点归还给容器
+                    // 保证键盘快捷键（Tab/Delete/Ctrl+Z 等）始终可用
+                    const target = e.target as HTMLElement;
+                    if (!target.isContentEditable && target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+                        containerRef.current?.focus();
+                    }
+                }}
             >
                 <ReactFlow
                     nodes={displayNodes}
@@ -745,6 +848,14 @@ function CopyIcon() {
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="9" y="9" width="13" height="13" rx="2" />
             <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+        </svg>
+    );
+}
+function PasteIcon() {
+    return (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" />
+            <rect x="8" y="2" width="8" height="4" rx="1" />
         </svg>
     );
 }

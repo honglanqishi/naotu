@@ -9,13 +9,15 @@ export const api = axios.create({
     },
 });
 
-// 响应拦截器：处理 401 自动跳登录
+// 响应拦截器：处理 401
+// 不再使用 window.location.href 强制硬刷新（会打断 React Query 后台请求和用户的编辑状态），
+// 改为派发自定义事件，由 Providers 的全局监听器通过 Next.js router 做客户端软跳转。
 api.interceptors.response.use(
     (response: AxiosResponse) => response,
     (error: AxiosError) => {
         if (error.response?.status === 401) {
             if (typeof window !== 'undefined') {
-                window.location.href = '/login';
+                window.dispatchEvent(new CustomEvent('auth:unauthorized'));
             }
         }
         return Promise.reject(error);

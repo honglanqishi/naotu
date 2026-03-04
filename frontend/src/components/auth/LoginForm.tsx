@@ -7,7 +7,10 @@ import Image from 'next/image';
 import { useAuthStore } from '@/store/authStore';
 
 export function LoginForm() {
-    const { isAuthLoading, loadingProvider, setAuthLoading } = useAuthStore();
+    // Google OAuth 的 loadingProvider 保留在全局 store（连接平台级），
+    // 邮符1登录/注册的 pending 状态改用局部 useState 维护，避免全局状态交叉污染。
+    const { loadingProvider, setAuthLoading } = useAuthStore();
+    const [isLoading, setIsLoading] = useState(false);
     const [isSignUp, setIsSignUp] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [name, setName] = useState('');
@@ -20,7 +23,7 @@ export function LoginForm() {
             toast.error('请输入您的姓名');
             return;
         }
-        setAuthLoading(true);
+        setIsLoading(true);
         try {
             const result = await signUp.email({
                 name: name.trim(),
@@ -31,18 +34,18 @@ export function LoginForm() {
             if (result?.error) {
                 console.error('[Auth] Email sign-up error:', result.error);
                 toast.error(result.error.message || '注册失败，请重试');
-                setAuthLoading(false);
+                setIsLoading(false);
             }
         } catch (err) {
             console.error('[Auth] Email sign-up exception:', err);
             toast.error('网络错误，请检查连接后重试');
-            setAuthLoading(false);
+            setIsLoading(false);
         }
     };
 
     const handleSignIn = async (e: React.FormEvent) => {
         e.preventDefault();
-        setAuthLoading(true);
+        setIsLoading(true);
         try {
             const result = await signIn.email({
                 email,
@@ -51,13 +54,13 @@ export function LoginForm() {
             });
             if (result?.error) {
                 console.error('[Auth] Email sign-in error:', result.error);
-                toast.error(result.error.message || '邮箱或密码错误，请重试');
-                setAuthLoading(false);
+                toast.error(result.error.message || '邮符1或密码错误，请重试');
+                setIsLoading(false);
             }
         } catch (err) {
             console.error('[Auth] Email sign-in exception:', err);
             toast.error('网络错误，请检查连接后重试');
-            setAuthLoading(false);
+            setIsLoading(false);
         }
     };
 
@@ -178,11 +181,11 @@ export function LoginForm() {
 
                 <button
                     type="submit"
-                    disabled={isAuthLoading}
+                    disabled={isLoading}
                     className="w-full h-[50px] rounded-[10px] text-[20px] font-bold text-white mt-[40px] cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
                     style={{ background: '#bd0c47' }}
                 >
-                    {isAuthLoading && !loadingProvider
+                    {isLoading
                         ? isSignUp ? 'Creating account...' : 'Signing in...'
                         : isSignUp ? 'Create Account' : 'Sign in'}
                 </button>
@@ -195,7 +198,7 @@ export function LoginForm() {
                     <button
                         type="button"
                         onClick={handleGoogleLogin}
-                        disabled={isAuthLoading}
+                        disabled={!!loadingProvider}
                         className="flex items-center justify-center w-[200px] h-[50px] bg-white rounded-[10px] cursor-pointer transition-opacity hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed gap-[8px]"
                         style={{ border: '1px solid #bcbec0' }}
                         aria-label="使用 Google 账号登录"

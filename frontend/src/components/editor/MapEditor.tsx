@@ -137,6 +137,34 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     nodesRef.current = nodes;
     edgesRef.current = edges;
 
+    // ─── Undo / Redo 历史栈（不用 state，避免无效渲染） ──────────────────────
+    type Snapshot = { nodes: Node[]; edges: Edge[] };
+    const historyRef = useRef<Snapshot[]>([]);
+    const futureRef  = useRef<Snapshot[]>([]);
+
+    /** 在执行任意变更操作前调用，把当前状态存入历史 */
+    const pushHistory = useCallback(() => {
+        historyRef.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+        if (historyRef.current.length > 50) historyRef.current.shift();
+        futureRef.current = []; // 新操作清空 redo 栈
+    }, []);
+
+    const undo = useCallback(() => {
+        const prev = historyRef.current.pop();
+        if (!prev) { toast.info('没有可撤销的操作'); return; }
+        futureRef.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+        setNodes(prev.nodes);
+        setEdges(prev.edges);
+    }, [setNodes, setEdges]);
+
+    const redo = useCallback(() => {
+        const next = futureRef.current.pop();
+        if (!next) { toast.info('没有可重做的操作'); return; }
+        historyRef.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+        setNodes(next.nodes);
+        setEdges(next.edges);
+    }, [setNodes, setEdges]);
+
     // 数据加载
     const { data: map, isLoading } = useQuery({
         queryKey: ['map', mapId],
@@ -180,6 +208,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     // 连线处理：统一创建层级线
     const onConnect = useCallback(
         (connection: Connection) => {
+            pushHistory();
             const newEdge: Edge = {
                 ...connection,
                 id: genId('edge'),
@@ -189,7 +218,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
             setEdges(nextEdges);
             setNodes((nds) => reLayout(nds, nextEdges));
         },
-        [edges, setEdges, setNodes, reLayout],
+        [edges, setEdges, setNodes, reLayout, pushHistory],
     );
 
     // 在画布指定位置新建节点
@@ -267,6 +296,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
             );
             if (alreadyConnected) return;
 
+            pushHistory();
             const newEdge: Edge = {
                 id: genId('edge'),
                 source: targetId,
@@ -278,7 +308,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
             setEdges(nextEdges);
             setNodes((nds) => reLayout(nds, nextEdges));
         },
-        [setEdges, setNodes, reLayout], // 不依赖 edges，通过 edgesRef.current 读取
+        [setEdges, setNodes, reLayout, pushHistory], // 不依赖 edges，通过 edgesRef.current 读取
     );
 
     // 键盘事件：Tab 新增子节点 / Delete 删除选中节点
@@ -288,12 +318,27 @@ function MapEditorInner({ mapId }: { mapId: string }) {
             const nodes = nodesRef.current;
             const edges = edgesRef.current;
 
+            // ── Ctrl+Z：撤销 ────────────────────────────────────────────
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                e.preventDefault();
+                undo();
+                return;
+            }
+
+            // ── Ctrl+Shift+Z / Ctrl+Y：重做 ─────────────────────────────
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+                e.preventDefault();
+                redo();
+                return;
+            }
+
             // ── Tab：新增子节点 ──────────────────────────────────────────
             if (e.key === 'Tab') {
                 const selectedNode = nodes.find((n) => n.selected);
                 if (!selectedNode) return;
                 e.preventDefault();
 
+                pushHistory();
                 const childNode: Node = {
                     id: genId('node'),
                     type: 'mindNode',
@@ -326,6 +371,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 if (selectedNodes.length === 0) return;
                 e.preventDefault();
 
+                pushHistory();
                 // 收集所有要删除的节点（含子孙）
                 const toDelete = new Set<string>();
                 selectedNodes.forEach((n) => {
@@ -333,10 +379,10 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                     collectDescendants(n.id, edges).forEach((id) => toDelete.add(id));
                 });
 
-                setNodes((nds) => nds.filter((n) => !toDelete.has(n.id)));
-                setEdges((eds) =>
-                    eds.filter((edge) => !toDelete.has(edge.source) && !toDelete.has(edge.target)),
-                );
+                const nextNodes = nodes.filter((n) => !toDelete.has(n.id));
+                const nextEdges = edges.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target));
+                setEdges(nextEdges);
+                setNodes(reLayout(nextNodes, nextEdges));
             }
         };
 
@@ -344,13 +390,30 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         container?.addEventListener('keydown', handleKeyDown);
         return () => container?.removeEventListener('keydown', handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [reLayout, setNodes, setEdges]); // 不依赖 nodes/edges，通过 ref 读取最新值
+    }, [reLayout, setNodes, setEdges, undo, redo, pushHistory]); // 不依赖 nodes/edges，通过 ref 读取最新值
+
+    // ─── 在 document 上监听 mousemove，确保不丢失移动事件（比 div onMouseMove 更可靠） ──
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent) => {
+            if (e.buttons !== 2) return;
+            const dx = e.clientX - rightDragRef.current.startX;
+            const dy = e.clientY - rightDragRef.current.startY;
+            if (Math.sqrt(dx * dx + dy * dy) > 5) {
+                rightDragRef.current.moved = true;
+            }
+        };
+        document.addEventListener('mousemove', handleMouseMove);
+        return () => document.removeEventListener('mousemove', handleMouseMove);
+    }, []);
 
     // 右键菜单：禁用浏览器默认菜单
     const onContextMenu = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
-        // 若右键拖拽了（平移画布），则不弹出菜单
-        if (rightDragRef.current.moved) return;
+        // 若右键拖拽了（平移画布），则不弹出菜单，同时阻止冒泡
+        if (rightDragRef.current.moved) {
+            e.stopPropagation();
+            return;
+        }
         const nodeEl = (e.target as HTMLElement).closest('[data-id]');
         const nodeId = nodeEl?.getAttribute('data-id') ?? undefined;
         setContextMenu({ x: e.clientX, y: e.clientY, nodeId });
@@ -373,6 +436,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 label: '添加子节点',
                 icon: <PlusIcon />,
                 onClick: () => {
+                    pushHistory();
                     const parent = nodes.find((n) => n.id === targetNodeId);
                     const childNode: Node = {
                         id: genId('node'),
@@ -398,6 +462,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 label: '复制节点',
                 icon: <CopyIcon />,
                 onClick: () => {
+                    pushHistory();
                     const original = nodes.find((n) => n.id === targetNodeId);
                     if (!original) return;
                     setNodes((nds) => [
@@ -416,13 +481,29 @@ function MapEditorInner({ mapId }: { mapId: string }) {
             const newNodeAction: ContextMenuAction = {
                 label: '新建节点',
                 icon: <AddIcon />,
-                onClick: () => setNodes((nds) => [...nds, createNode(flowPos)]),
+                onClick: () => {
+                    pushHistory();
+                    setNodes((nds) => [...nds, createNode(flowPos)]);
+                },
                 dividerAfter: !isRoot,
+            };
+
+            // 撤销/重做选项（除了删除节点内部已 pushHistory）
+            const nodeUndoAction: ContextMenuAction = {
+                label: historyRef.current.length > 0 ? `撤销 (${historyRef.current.length})` : '撤销',
+                icon: <UndoIcon />,
+                onClick: undo,
+            };
+            const nodeRedoAction: ContextMenuAction = {
+                label: futureRef.current.length > 0 ? `重做 (${futureRef.current.length})` : '重做',
+                icon: <RedoIcon />,
+                onClick: redo,
+                dividerAfter: true,
             };
 
             // 根节点不显示删除选项
             if (isRoot) {
-                return [addChildAction, copyAction, newNodeAction];
+                return [nodeUndoAction, nodeRedoAction, addChildAction, copyAction, newNodeAction];
             }
 
             const deleteAction: ContextMenuAction = {
@@ -430,15 +511,19 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 icon: <TrashIcon />,
                 danger: true,
                 onClick: () => {
+                    pushHistory();
                     // 递归收集所有子孙节点 ID
                     const descendants = collectDescendants(targetNodeId, edges);
                     const toDelete = new Set([targetNodeId, ...descendants]);
-                    setNodes((nds) => nds.filter((n) => !toDelete.has(n.id)));
-                    setEdges((eds) => eds.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target)));
+                    const nextNodes = nodes.filter((n) => !toDelete.has(n.id));
+                    const nextEdges = edges.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target));
+                    setEdges(nextEdges);
+                    // 删除后重新布局，确保兄弟节点位置正确对齐
+                    setNodes(reLayout(nextNodes, nextEdges));
                 },
             };
 
-            return [addChildAction, copyAction, newNodeAction, deleteAction];
+            return [nodeUndoAction, nodeRedoAction, addChildAction, copyAction, newNodeAction, deleteAction];
         }
 
         // ── 右键点击空白区域 ──────────────────────────────────────────────
@@ -446,7 +531,24 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         const newNodeAction: ContextMenuAction = {
             label: '新建节点',
             icon: <AddIcon />,
-            onClick: () => setNodes((nds) => [...nds, createNode(flowPos)]),
+            onClick: () => {
+                pushHistory();
+                setNodes((nds) => [...nds, createNode(flowPos)]);
+            },
+        };
+
+        // 撤销/重做（始终显示在最顶部）
+        const undoAction: ContextMenuAction = {
+            label: historyRef.current.length > 0 ? `撤销 (${historyRef.current.length})` : '撤销',
+            icon: <UndoIcon />,
+            onClick: undo,
+            dividerAfter: true,
+        };
+        const redoAction: ContextMenuAction = {
+            label: futureRef.current.length > 0 ? `重做 (${futureRef.current.length})` : '重做',
+            icon: <RedoIcon />,
+            onClick: redo,
+            dividerAfter: true,
         };
 
         // 若有多个选中节点，补充批量操作
@@ -456,22 +558,23 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 icon: <TrashIcon />,
                 danger: true,
                 onClick: () => {
+                    pushHistory();
                     const toDelete = new Set<string>();
                     selectedNodes.forEach((n) => {
                         toDelete.add(n.id);
                         collectDescendants(n.id, edges).forEach((id) => toDelete.add(id));
                     });
-                    setNodes((nds) => nds.filter((n) => !toDelete.has(n.id)));
-                    setEdges((eds) =>
-                        eds.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target)),
-                    );
+                    const nextNodes = nodes.filter((n) => !toDelete.has(n.id));
+                    const nextEdges = edges.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target));
+                    setEdges(nextEdges);
+                    setNodes(reLayout(nextNodes, nextEdges));
                 },
             };
-            return [newNodeAction, deleteSelectedAction];
+            return [undoAction, redoAction, newNodeAction, deleteSelectedAction];
         }
 
-        return [newNodeAction];
-    }, [contextMenu, nodes, edges, setNodes, setEdges, createNode, reLayout, screenToFlowPosition]);
+        return [undoAction, redoAction, newNodeAction];
+    }, [contextMenu, nodes, edges, setNodes, setEdges, createNode, reLayout, screenToFlowPosition, pushHistory, undo, redo]);
 
     // ─── 折叠：计算需要隐藏的节点/边（不修改 nodes 状态,仅影响渲染） ──────────
     // 无折叠节点时返回稳定空集合（EMPTY_ID_SET），避免 displayNodes memo 因新 Set 引用而失效
@@ -528,15 +631,6 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 // 追踪右键按下位置，用于判断是否发生了平移拖拽
                 if (e.button === 2) {
                     rightDragRef.current = { startX: e.clientX, startY: e.clientY, moved: false };
-                }
-            }}
-            onMouseMove={(e) => {
-                if (e.buttons === 2) {
-                    const dx = e.clientX - rightDragRef.current.startX;
-                    const dy = e.clientY - rightDragRef.current.startY;
-                    if (Math.sqrt(dx * dx + dy * dy) > 5) {
-                        rightDragRef.current.moved = true;
-                    }
                 }
             }}
         >
@@ -659,6 +753,22 @@ function TrashIcon() {
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="3 6 5 6 21 6" />
             <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+        </svg>
+    );
+}
+function UndoIcon() {
+    return (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 7v6h6" />
+            <path d="M3 13C4.6 8.9 8.9 6 14 6c4.4 0 8.3 2.4 10 6" />
+        </svg>
+    );
+}
+function RedoIcon() {
+    return (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 7v6h-6" />
+            <path d="M21 13C19.4 8.9 15.1 6 10 6c-4.4 0-8.3 2.4-10 6" />
         </svg>
     );
 }

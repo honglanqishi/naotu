@@ -1,30 +1,21 @@
 'use client';
 
-import { BaseEdge, getBezierPath, getStraightPath, type EdgeProps } from '@xyflow/react';
+import { BaseEdge, getStraightPath, type EdgeProps } from '@xyflow/react';
 
-/** 父子层级连接线：水平时用直线，其余用贝塞尔曲线，无箭头 */
+/**
+ * 父子层级连接线。1 个子节点时与父节点 y 相同，始终用直线。
+ * 多子节点时 y 坐标不同，小角度斜线待用；为避免贝塞尔阈値问题，统一用直线。
+ * 背景：贝塞尔曲线在不同高度节点间会因 handle Y 偏移差满足阈値而错误彯曲。
+ */
 export function HierarchyEdge({
   sourceX,
   sourceY,
   targetX,
   targetY,
-  sourcePosition,
-  targetPosition,
   style,
   markerEnd,
 }: EdgeProps) {
-  // 源目标 Y 几乎相同（单子节点水平直连）→ 用直线，避免出现微曲
-  const isHorizontal = Math.abs(sourceY - targetY) < 3;
-  const [edgePath] = isHorizontal
-    ? getStraightPath({ sourceX, sourceY, targetX, targetY })
-    : getBezierPath({
-        sourceX,
-        sourceY,
-        sourcePosition,
-        targetX,
-        targetY,
-        targetPosition,
-      });
+  const [edgePath] = getStraightPath({ sourceX, sourceY, targetX, targetY });
 
   return (
     <BaseEdge

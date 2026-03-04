@@ -8,6 +8,10 @@ export interface ContextMenuAction {
   onClick: () => void;
   danger?: boolean;
   dividerAfter?: boolean;
+  /** 右侧显示的快捷键提示文字，如 "Ctrl+C" */
+  shortcut?: string;
+  /** 是否禁用该菜单项 */
+  disabled?: boolean;
 }
 
 interface ContextMenuProps {
@@ -80,7 +84,9 @@ export function ContextMenu({ x, y, actions, onClose }: ContextMenuProps) {
       {actions.map((action, idx) => (
         <div key={idx}>
           <button
+            disabled={action.disabled}
             onClick={() => {
+              if (action.disabled) return;
               action.onClick();
               onClose();
             }}
@@ -92,13 +98,19 @@ export function ContextMenu({ x, y, actions, onClose }: ContextMenuProps) {
               padding: '7px 14px',
               background: 'transparent',
               border: 'none',
-              cursor: 'pointer',
+              cursor: action.disabled ? 'not-allowed' : 'pointer',
               fontSize: 13,
-              color: action.danger ? '#f87171' : 'var(--foreground)',
+              color: action.disabled
+                ? 'rgba(255,255,255,0.25)'
+                : action.danger
+                  ? '#f87171'
+                  : 'var(--foreground)',
               textAlign: 'left',
               transition: 'background 0.1s',
+              opacity: action.disabled ? 0.5 : 1,
             }}
             onMouseEnter={(e) => {
+              if (action.disabled) return;
               (e.currentTarget as HTMLButtonElement).style.background = action.danger
                 ? 'rgba(248,113,113,0.1)'
                 : 'rgba(255,255,255,0.06)';
@@ -108,11 +120,16 @@ export function ContextMenu({ x, y, actions, onClose }: ContextMenuProps) {
             }}
           >
             {action.icon && (
-              <span style={{ opacity: 0.7, display: 'flex', alignItems: 'center' }}>
+              <span style={{ opacity: 0.7, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                 {action.icon}
               </span>
             )}
-            {action.label}
+            <span style={{ flex: 1 }}>{action.label}</span>
+            {action.shortcut && (
+              <span style={{ fontSize: 11, opacity: 0.45, marginLeft: 4, flexShrink: 0 }}>
+                {action.shortcut}
+              </span>
+            )}
           </button>
           {action.dividerAfter && (
             <div

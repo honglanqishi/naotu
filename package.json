@@ -1,0 +1,20 @@
+{
+    "name": "naotu",
+    "version": "1.0.0",
+    "description": "Naotu workspace",
+    "private": true,
+    "scripts": {
+        "postinstall": "npm run install:all",
+        "install:all": "npm install --prefix database && npm install --prefix backend && npm install --prefix frontend",
+        "predev": "node -e \"const {execSync}=require('child_process');['3001','3000'].forEach(p=>{try{const r=execSync(`netstat -ano`).toString();const lines=r.split('\\n').filter(l=>l.includes(':'+p) && l.includes('LISTENING'));lines.forEach(l=>{const pid=l.trim().split(/\\s+/).pop();if(pid&&pid!=='0')try{execSync('taskkill /F /PID '+pid,{stdio:'ignore'})}catch(e){}});}catch(e){}});console.log('Ports cleared')\"",
+        "dev": "npm run migrate:local && concurrently --names \"backend,frontend\" --prefix-colors \"blue,green\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+        "dev:backend": "npm run dev --prefix backend",
+        "dev:frontend": "npm run dev --prefix frontend",
+        "migrate:local": "npm run generate:local --prefix database && npm run migrate:local --prefix database",
+        "migrate": "npm run migrate --prefix database",
+        "dev:pg": "concurrently --names \"postgres,backend,frontend\" --prefix-colors \"yellow,blue,green\" \"docker-compose up postgres\" \"npm run dev:backend\" \"npm run dev:frontend\""
+    },
+    "devDependencies": {
+        "concurrently": "^9.0.0"
+    }
+}

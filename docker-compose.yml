@@ -1,0 +1,87 @@
+version: '3.9'
+
+services:
+  # PostgreSQL 17
+  postgres:
+    image: postgres:17-alpine
+    container_name: naotu_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: naotu
+      POSTGRES_PASSWORD: naotu_password
+      POSTGRES_DB: naotu_db
+    ports:
+      - '5433:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ 'CMD-SHELL', 'pg_isready -U naotu -d naotu_db' ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - naotu_net
+
+  # Hono.js Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: naotu_backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://naotu:naotu_password@postgres:5432/naotu_db
+      NODE_ENV: production
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - naotu_net
+
+  # Next.js Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: naotu_frontend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      # 服务内部地址，用于 Next.js rewrite 代理（不暴露给浏览器）
+      BACKEND_INTERNAL_URL: http://backend:3001
+    ports:
+      - '3000:3000'
+    depends_on:
+      - backend
+    networks:
+      - naotu_net
+
+  # Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: naotu_nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - naotu_net
+
+volumes:
+  pgdata:
+
+
+networks:
+  naotu_net:
+    driver: bridge

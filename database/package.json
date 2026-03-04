@@ -1,0 +1,28 @@
+{
+    "name": "@naotu/database",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "generate": "drizzle-kit generate",
+        "migrate": "drizzle-kit migrate",
+        "push": "drizzle-kit push",
+        "studio": "drizzle-kit studio",
+        "seed": "tsx src/seed.ts",
+        "generate:local": "drizzle-kit generate --config=drizzle.sqlite.config.ts",
+        "migrate:local": "drizzle-kit migrate --config=drizzle.sqlite.config.ts",
+        "push:local": "drizzle-kit push --config=drizzle.sqlite.config.ts",
+        "studio:local": "drizzle-kit studio --config=drizzle.sqlite.config.ts"
+    },
+    "dependencies": {
+        "drizzle-orm": "^0.41.0",
+        "postgres": "^3.4.5",
+        "@libsql/client": "^0.14.0"
+    },
+    "devDependencies": {
+        "drizzle-kit": "^0.30.0",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.3",
+        "@types/node": "^22.10.0"
+    }
+}

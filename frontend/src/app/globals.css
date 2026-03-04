@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+/* =============================================
+   CSS 自定义变量（设计系统 Token）
+   ============================================= */
+:root {
+  /* 背景色 */
+  --background: #0f0f17;
+  --background-secondary: #141420;
+  --background-card: #1a1a2e;
+  --background-hover: #1e1e30;
+
+  /* 前景色 */
+  --foreground: #e8e8f0;
+  --foreground-muted: #8888aa;
+  --foreground-subtle: #55556a;
+
+  /* 品牌色 - 蓝紫渐变系 */
+  --primary: #6366f1;
+  --primary-hover: #5254cc;
+  --primary-foreground: #ffffff;
+
+  /* 强调色 */
+  --accent: #8b5cf6;
+  --accent-foreground: #ffffff;
+
+  /* 边框色 */
+  --border: #2a2a3e;
+  --border-hover: #3a3a55;
+
+  /* 成功/错误/警告 */
+  --success: #10b981;
+  --error: #ef4444;
+  --warning: #f59e0b;
+
+  /* 圆角 */
+  --radius: 0.75rem;
+  --radius-sm: 0.5rem;
+  --radius-lg: 1rem;
+
+  /* 字体 */
+  --font-sans: var(--font-inter, 'Inter', system-ui, sans-serif);
+}
+
+/* =============================================
+   基础样式重置（Tailwind v4 preflight 已处理 margin/padding）
+   ============================================= */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  min-height: 100vh;
+}
+
+/* =============================================
+   滚动条样式
+   ============================================= */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-hover);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground-subtle);
+}
+
+/* =============================================
+   全局动画
+   ============================================= */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--background-card) 25%,
+    var(--background-hover) 50%,
+    var(--background-card) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Figma: 输入框占位符颜色 #bcbec0, 14px */
+input::placeholder {
+  color: #bcbec0;
+  font-size: 14px;
+  font-weight: 400;
+}

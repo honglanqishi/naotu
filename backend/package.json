@@ -1,0 +1,29 @@
+{
+    "name": "@naotu/backend",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "tsx watch src/index.ts",
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "lint": "eslint src --ext .ts"
+    },
+    "dependencies": {
+        "@hono/node-server": "^1.13.7",
+        "@hono/zod-validator": "^0.4.3",
+        "@libsql/client": "^0.14.0",
+        "better-auth": "^1.2.7",
+        "dotenv": "^16.4.7",
+        "drizzle-orm": "^0.41.0",
+        "hono": "^4.7.0",
+        "postgres": "^3.4.5",
+        "undici": "^7.22.0",
+        "zod": "^3.24.1"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.0",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.3"
+    }
+}

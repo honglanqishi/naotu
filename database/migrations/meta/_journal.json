@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1772530097836,
+      "tag": "0000_strange_skullbuster",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1772530097837,
+      "tag": "0001_add_account_token_fields",
+      "breakpoints": true
+    }
+  ]
+}

@@ -15,6 +15,7 @@ import {
     type Connection,
     type Node,
     type Edge,
+    type NodeChange,
     useReactFlow,
     ReactFlowProvider,
     type Viewport,
@@ -131,6 +132,8 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     const [clipboard, setClipboard] = useState<Node[]>([]);
     const containerRef = useRef<HTMLDivElement>(null);
     const dropTargetRef = useRef<string | null>(null);
+    // 用于 onNodesChange dimensions 去抖重布局（防止每帧 resize 事件都触发）
+    const layoutDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // 追踪右键是否发生拖拽（平移），避免平移后弹出右键菜单
     const rightDragRef = useRef({ startX: 0, startY: 0, moved: false });
     // 用 ref 持有最新 nodes/edges，供键盘 handler 使用，避免 useEffect 频繁重新注册
@@ -255,10 +258,16 @@ function MapEditorInner({ mapId }: { mapId: string }) {
             const nearest = findCollidingNode(nodesRef.current, draggedNode.id, draggedNode);
 
             if (nearest !== dropTargetRef.current) {
-                if (dropTargetRef.current) {
+                // ⚠️ 必须先把当前值保存到局部变量，再更新 ref！
+                // setNodes 的函数式更新器是延迟执行的，若直接读 dropTargetRef.current，
+                // 会读到已被下面 `= nearest` 改掉的新值，导致清除逻辑永远匹配不到目标节点。
+                const prevTarget = dropTargetRef.current;
+                dropTargetRef.current = nearest;
+
+                if (prevTarget) {
                     setNodes((nds) =>
                         nds.map((n) =>
-                            n.id === dropTargetRef.current
+                            n.id === prevTarget
                                 ? { ...n, data: { ...n.data, isDropTarget: false } }
                                 : n,
                         ),
@@ -273,7 +282,6 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                         ),
                     );
                 }
-                dropTargetRef.current = nearest;
             }
         },
         [setNodes], // 不依赖 nodes，通过 nodesRef.current 读取
@@ -437,14 +445,23 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reLayout, setNodes, setEdges, undo, redo, pushHistory, setClipboard]); // 不依赖 nodes/edges，通过 ref 读取最新值
 
-    // ─── 监听节点编辑提交事件，触发重新布局（节点尺寸可能已因内容变化而改变） ────────
-    useEffect(() => {
-        const handleCommitEdit = () => {
-            setNodes((nds) => reLayout(nds, edgesRef.current));
-        };
-        document.addEventListener('mindnode:commitEdit', handleCommitEdit);
-        return () => document.removeEventListener('mindnode:commitEdit', handleCommitEdit);
-    }, [setNodes, reLayout]);
+    // ─── 监听 ReactFlow 节点尺寸变化事件，精确触发重新布局 ─────────────────────────
+    // ReactFlow 在测量到节点真实 DOM 尺寸后，会通过 onNodesChange 发出 type='dimensions' 变更。
+    // 这是最可靠的时机：此时 node.measured 已经是最新值，布局计算不会因为用旧尺寸而出错。
+    // 用去抖（50ms）合并同一帧内多个节点同时尺寸变化的情况。
+    const onNodesChangeWithLayout = useCallback(
+        (changes: NodeChange[]) => {
+            onNodesChange(changes);
+            // 仅当有节点尺寸真实变化时才触发重布局（排除拖拽时的 position 变更）
+            const hasDimension = changes.some((c) => c.type === 'dimensions');
+            if (!hasDimension) return;
+            if (layoutDebounceRef.current) clearTimeout(layoutDebounceRef.current);
+            layoutDebounceRef.current = setTimeout(() => {
+                setNodes((nds) => reLayout(nds, edgesRef.current));
+            }, 50);
+        },
+        [onNodesChange, setNodes, reLayout],
+    );
 
     // ─── 在 document 上监听 mousemove，确保不丢失移动事件（比 div onMouseMove 更可靠） ──
     useEffect(() => {
@@ -793,7 +810,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                     edges={displayEdges}
                     nodeTypes={nodeTypes}
                     edgeTypes={edgeTypes}
-                    onNodesChange={onNodesChange}
+                    onNodesChange={onNodesChangeWithLayout}
                     onEdgesChange={onEdgesChange}
                     onConnect={onConnect}
                     onNodeDrag={onNodeDrag}

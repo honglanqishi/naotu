@@ -105,17 +105,15 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
     };
   }, [fullscreenImg]);
 
-  /** 提交编辑：保存 HTML + 提取纯文本 label，并通知 MapEditor 触发布局刷新 */
+  /** 提交编辑：保存 HTML + 提取纯文本 label。
+   * 尺寸刷新由 ReactFlow 的 dimensions 事件自动触发 MapEditor 重新布局，无需手动 dispatch。
+   */
   const commitEdit = useCallback(() => {
     if (!editorRef.current) return;
     const newHtml = editorRef.current.innerHTML;
     const newLabel = (editorRef.current.innerText ?? '').trim() || nodeData.label;
     updateNodeData(id, { label: newLabel, html: newHtml });
     setEditState('normal');
-    // 节点内容可能导致尺寸变化，等待 ReactFlow 重新测量后再触发重新布局
-    setTimeout(() => {
-      document.dispatchEvent(new CustomEvent('mindnode:commitEdit'));
-    }, 80);
   }, [id, nodeData.label, updateNodeData]);
 
   const handleDoubleClick = useCallback(

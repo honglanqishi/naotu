@@ -132,6 +132,8 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     const [clipboard, setClipboard] = useState<Node[]>([]);
     const containerRef = useRef<HTMLDivElement>(null);
     const dropTargetRef = useRef<string | null>(null);
+    // 追踪节点是否正在被拖拽，拖拽期间禁止 dimensions 触发 reLayout
+    const isDraggingRef = useRef(false);
     // 用于 onNodesChange dimensions 去抖重布局（防止每帧 resize 事件都触发）
     const layoutDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // 追踪右键是否发生拖拽（平移），避免平移后弹出右键菜单
@@ -252,36 +254,30 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         [screenToFlowPosition, createNode, setNodes],
     );
 
+    // 拖拽开始：标记拖拽状态，避免 dimensions 变化触发 reLayout 导致节点位置闪烁
+    const onNodeDragStart = useCallback(() => {
+        isDraggingRef.current = true;
+    }, []);
+
     // 拖拽过程：基于包围盒碰撞检测吸附目标（动态读取 measured 尺寸，触碰即触发）
     const onNodeDrag = useCallback(
         (_e: React.MouseEvent, draggedNode: Node) => {
             const nearest = findCollidingNode(nodesRef.current, draggedNode.id, draggedNode);
 
             if (nearest !== dropTargetRef.current) {
-                // ⚠️ 必须先把当前值保存到局部变量，再更新 ref！
-                // setNodes 的函数式更新器是延迟执行的，若直接读 dropTargetRef.current，
-                // 会读到已被下面 `= nearest` 改掉的新值，导致清除逻辑永远匹配不到目标节点。
                 const prevTarget = dropTargetRef.current;
                 dropTargetRef.current = nearest;
 
-                if (prevTarget) {
-                    setNodes((nds) =>
-                        nds.map((n) =>
-                            n.id === prevTarget
-                                ? { ...n, data: { ...n.data, isDropTarget: false } }
-                                : n,
-                        ),
-                    );
-                }
-                if (nearest) {
-                    setNodes((nds) =>
-                        nds.map((n) =>
-                            n.id === nearest
-                                ? { ...n, data: { ...n.data, isDropTarget: true } }
-                                : n,
-                        ),
-                    );
-                }
+                // 单次 setNodes 合并新旧 isDropTarget 变更，避免两次 setState 导致 ReactFlow 中间态渲染
+                setNodes((nds) =>
+                    nds.map((n) => {
+                        if (n.id === prevTarget && prevTarget !== nearest)
+                            return { ...n, data: { ...n.data, isDropTarget: false } };
+                        if (n.id === nearest)
+                            return { ...n, data: { ...n.data, isDropTarget: true } };
+                        return n;
+                    }),
+                );
             }
         },
         [setNodes], // 不依赖 nodes，通过 nodesRef.current 读取
@@ -290,6 +286,8 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     // 拖拽结束：若有吸附目标，建立父子关系并重新布局（通过 ref 读取最新 edges）
     const onNodeDragStop = useCallback(
         (_e: React.MouseEvent, draggedNode: Node) => {
+            // 先恢复拖拽标记，再执行清理与布局
+            isDraggingRef.current = false;
             const targetId = dropTargetRef.current;
 
             setNodes((nds) =>
@@ -452,6 +450,8 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     const onNodesChangeWithLayout = useCallback(
         (changes: NodeChange[]) => {
             onNodesChange(changes);
+            // 拖拽期间禁止 dimensions 触发重布局，否则会把拖拽节点强制 snap 回布局位置
+            if (isDraggingRef.current) return;
             // 仅当有节点尺寸真实变化时才触发重布局（排除拖拽时的 position 变更）
             const hasDimension = changes.some((c) => c.type === 'dimensions');
             if (!hasDimension) return;
@@ -813,6 +813,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                     onNodesChange={onNodesChangeWithLayout}
                     onEdgesChange={onEdgesChange}
                     onConnect={onConnect}
+                    onNodeDragStart={onNodeDragStart}
                     onNodeDrag={onNodeDrag}
                     onNodeDragStop={onNodeDragStop}
                     onPaneClick={onPaneClick}

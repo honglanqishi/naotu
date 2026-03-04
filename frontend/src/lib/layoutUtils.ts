@@ -68,9 +68,11 @@ function makePlaceSubtree(
       return;
     }
 
-    // 多子节点：垂直均匀分布，父节点居中
+    // 多子节点：垂直均匀分布，父节点以自身 CENTER（cy + parentH/2）为中心对齐子节点组
+    // 修复：原来以 cy（top-left）为中心，导致图文节点（高度较大）时子节点组偏离parentH/2导致重叠
+    const parentH = heightMap.get(nodeId) ?? NODE_H;
     const totalH = children.reduce((s, c) => s + subtreeHeight(c) + V_GAP, 0) - V_GAP;
-    let startY = cy - totalH / 2;
+    let startY = cy + parentH / 2 - totalH / 2;
     children.forEach((childId) => {
       const h = subtreeHeight(childId);
       place(childId, childX, startY + h / 2, direction);
@@ -144,7 +146,8 @@ function layoutMindmap(
     place(rightChildren[0], H_GAP, (rootH - childH) / 2, 'right');
   } else if (rightChildren.length > 1) {
     const totalH = rightChildren.reduce((s, c) => s + subtreeHeight(c) + V_GAP, 0) - V_GAP;
-    let startY = -totalH / 2;
+    // 修复：以根节点CENTER（rootH/2）为中心，原来以top-left(0)为中心导致偏离
+    let startY = rootH / 2 - totalH / 2;
     rightChildren.forEach((childId) => {
       const h = subtreeHeight(childId);
       place(childId, H_GAP, startY + h / 2, 'right');
@@ -159,7 +162,8 @@ function layoutMindmap(
     place(leftChildren[0], -H_GAP, (rootH - childH) / 2, 'left');
   } else if (leftChildren.length > 1) {
     const totalH = leftChildren.reduce((s, c) => s + subtreeHeight(c) + V_GAP, 0) - V_GAP;
-    let startY = -totalH / 2;
+    // 修复：以根节点CENTER（rootH/2）为中心
+    let startY = rootH / 2 - totalH / 2;
     leftChildren.forEach((childId) => {
       const h = subtreeHeight(childId);
       place(childId, -H_GAP, startY + h / 2, 'left');

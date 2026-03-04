@@ -41,7 +41,15 @@ function makeSubtreeHeight(
   return subtreeHeight;
 }
 
-/** 递归放置子树，记录 sideMap（每个节点属于哪侧） */
+/**
+ * 递归放置子树，记录 sideMap（每个节点属于哪侧）
+ *
+ * ★ 坐标约定（统一，不可混用）：
+ *   cy = 当前节点自身的 Y 轴中心（center Y），不是 top-left！
+ *   保存到 posMap 时转为 ReactFlow 要求的 top-left：y = cy - nodeH/2
+ *
+ * 这样无论节点高度多少，父子中心对齐和组间距计算都不会出错。
+ */
 function makePlaceSubtree(
   childrenMap: Map<string, string[]>,
   subtreeHeight: (id: string) => number,
@@ -50,7 +58,9 @@ function makePlaceSubtree(
   heightMap: Map<string, number>,
 ) {
   function place(nodeId: string, cx: number, cy: number, direction: NodeSide) {
-    posMap.set(nodeId, { x: cx, y: cy });
+    // cy = 节点中心 Y → 转为 top-left Y 存入 posMap
+    const nodeH = heightMap.get(nodeId) ?? NODE_H;
+    posMap.set(nodeId, { x: cx, y: cy - nodeH / 2 });
     sideMap.set(nodeId, direction);
     const children = childrenMap.get(nodeId) ?? [];
     if (children.length === 0) return;
@@ -58,23 +68,17 @@ function makePlaceSubtree(
     const childX = direction === 'right' ? cx + H_GAP : cx - H_GAP;
 
     if (children.length === 1) {
-      // 单子节点：保持父子中心对齐，确保连线水平
-      // cy 是当前节点的 top-left Y，需要计算子节点的 top-left Y
-      // 使得子节点的中心 Y 与父节点的中心 Y 对齐
-      const parentH = heightMap.get(nodeId) ?? NODE_H;
-      const childH = heightMap.get(children[0]) ?? NODE_H;
-      const alignedY = cy + (parentH - childH) / 2;
-      place(children[0], childX, alignedY, direction);
+      // 单子节点：子节点中心 Y = 父节点中心 Y（水平连线对齐）
+      place(children[0], childX, cy, direction);
       return;
     }
 
-    // 多子节点：垂直均匀分布，父节点以自身 CENTER（cy + parentH/2）为中心对齐子节点组
-    // 修复：原来以 cy（top-left）为中心，导致图文节点（高度较大）时子节点组偏离parentH/2导致重叠
-    const parentH = heightMap.get(nodeId) ?? NODE_H;
+    // 多子节点：各子树垂直均匀分布，整组以父节点中心 Y（cy）为中轴
     const totalH = children.reduce((s, c) => s + subtreeHeight(c) + V_GAP, 0) - V_GAP;
-    let startY = cy + parentH / 2 - totalH / 2;
+    let startY = cy - totalH / 2; // 第一个子树区域的顶部 Y
     children.forEach((childId) => {
       const h = subtreeHeight(childId);
+      // 每个子树区域中心 = startY + h/2，传给子节点作为其中心 Y
       place(childId, childX, startY + h / 2, direction);
       startY += h + V_GAP;
     });
@@ -139,30 +143,29 @@ function layoutMindmap(
     }
   });
 
+  // ★ place() 约定：cy = 节点中心 Y。
+  // 根节点 top-left=(0,0)，根节点中心 Y = rootH/2。
+  // 所有子节点以 rootH/2 为基准对齐。
+
   // 放置右侧分支
   if (rightChildren.length === 1) {
-    const childH = heightMap.get(rightChildren[0]) ?? NODE_H;
-    // 单子节点：子节点中心 Y 对齐根节点中心 Y
-    place(rightChildren[0], H_GAP, (rootH - childH) / 2, 'right');
+    // 单子节点中心 Y = 根节点中心 Y
+    place(rightChildren[0], H_GAP, rootH / 2, 'right');
   } else if (rightChildren.length > 1) {
     const totalH = rightChildren.reduce((s, c) => s + subtreeHeight(c) + V_GAP, 0) - V_GAP;
-    // 修复：以根节点CENTER（rootH/2）为中心，原来以top-left(0)为中心导致偏离
-    let startY = rootH / 2 - totalH / 2;
+    let startY = rootH / 2 - totalH / 2; // 第一个子树区域顶部
     rightChildren.forEach((childId) => {
       const h = subtreeHeight(childId);
-      place(childId, H_GAP, startY + h / 2, 'right');
+      place(childId, H_GAP, startY + h / 2, 'right'); // 子树区域中心 = 节点中心
       startY += h + V_GAP;
     });
   }
 
   // 放置左侧分支
   if (leftChildren.length === 1) {
-    const childH = heightMap.get(leftChildren[0]) ?? NODE_H;
-    // 单子节点：子节点中心 Y 对齐根节点中心 Y
-    place(leftChildren[0], -H_GAP, (rootH - childH) / 2, 'left');
+    place(leftChildren[0], -H_GAP, rootH / 2, 'left');
   } else if (leftChildren.length > 1) {
     const totalH = leftChildren.reduce((s, c) => s + subtreeHeight(c) + V_GAP, 0) - V_GAP;
-    // 修复：以根节点CENTER（rootH/2）为中心
     let startY = rootH / 2 - totalH / 2;
     leftChildren.forEach((childId) => {
       const h = subtreeHeight(childId);
@@ -186,7 +189,9 @@ function layoutTreeLR(
   const heightMap = buildHeightMap(nodes);
   const subtreeHeight = makeSubtreeHeight(childrenMap, heightMap);
   const place = makePlaceSubtree(childrenMap, subtreeHeight, posMap, sideMap, heightMap);
-  place(rootId, 0, 0, 'right');
+  // tree-lr：根节点 top-left=(0,0)，中心 Y = rootH/2
+  const rootH = heightMap.get(rootId) ?? NODE_H;
+  place(rootId, 0, rootH / 2, 'right');
   return { posMap, sideMap };
 }
 

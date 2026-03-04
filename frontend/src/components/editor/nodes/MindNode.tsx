@@ -26,6 +26,20 @@ function escapeHtml(text: string): string {
     .replace(/\n/g, '<br>');
 }
 
+/**
+ * 简单 HTML 消洁：删除 <script>、on* 事件属性、javascript: 协议。
+ * 保留 <br>、<b>、<i>、<u> 等安全内联格式化标签，不引入外部依赖。
+ */
+function sanitizeHtml(html: string): string {
+  return html
+    // 删除 <script>...</script> 及内容
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    // 删除 on* 事件属性（onclick="..."、onmouseover="..." 等）
+    .replace(/\bon\w+\s*=\s*(["'])[^"']*\1/gi, '')
+    // 删除 javascript: 协议（href="javascript:..."、src="javascript:..." 等）
+    .replace(/javascript\s*:/gi, '');
+}
+
 /** 节点状态机: normal → editing → normal */
 type EditState = 'normal' | 'editing';
 
@@ -55,10 +69,10 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
   /** 当前节点应展示的 HTML（优先 html 字段，降级为转义后的纯文本） */
   const displayHtml = nodeData.html ?? escapeHtml(nodeData.label);
 
-  // ── 非编辑态时同步 innerHTML（useLayoutEffect 避免闪烁） ──────────────────
+  // ── 非编辑态时同步 innerHTML（先清洁再赋値，useLayoutEffect 避免闪烁） ──────────────────
   useLayoutEffect(() => {
     if (editState === 'normal' && editorRef.current) {
-      editorRef.current.innerHTML = displayHtml;
+      editorRef.current.innerHTML = sanitizeHtml(displayHtml);
     }
   }, [editState, displayHtml]);
 
@@ -110,7 +124,8 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
    */
   const commitEdit = useCallback(() => {
     if (!editorRef.current) return;
-    const newHtml = editorRef.current.innerHTML;
+    // 先清洁 HTML 再保存，防止用户粘贴恶意内容导致 XSS
+    const newHtml = sanitizeHtml(editorRef.current.innerHTML);
     const newLabel = (editorRef.current.innerText ?? '').trim() || nodeData.label;
     updateNodeData(id, { label: newLabel, html: newHtml });
     setEditState('normal');

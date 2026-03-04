@@ -130,6 +130,9 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     const [layoutStyle] = useState<LayoutStyle>('mindmap');
     /** 节点剪贴板：存储 Ctrl+C 复制的节点，用于 Ctrl+V 粘贴 */
     const [clipboard, setClipboard] = useState<Node[]>([]);
+    /** clipboard 的 ref 版本，供 keydown handler 读取（避免 stale closure + updater 内 preventDefault 问题） */
+    const clipboardRef = useRef<Node[]>([]);
+    clipboardRef.current = clipboard;
     const containerRef = useRef<HTMLDivElement>(null);
     const dropTargetRef = useRef<string | null>(null);
     // 追踪节点是否正在被拖拽，拖拽期间禁止 dimensions 触发 reLayout
@@ -149,9 +152,9 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     const historyRef = useRef<Snapshot[]>([]);
     const futureRef  = useRef<Snapshot[]>([]);
 
-    /** 在执行任意变更操作前调用，把当前状态存入历史 */
+    /** 在执行任意变更操作前调用，把当前状态存入历史（浅拷贝数组，防止引用共享导致快照被后续操作静默污染） */
     const pushHistory = useCallback(() => {
-        historyRef.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+        historyRef.current.push({ nodes: [...nodesRef.current], edges: [...edgesRef.current] });
         if (historyRef.current.length > 50) historyRef.current.shift();
         futureRef.current = []; // 新操作清空 redo 栈
     }, []);
@@ -159,7 +162,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     const undo = useCallback(() => {
         const prev = historyRef.current.pop();
         if (!prev) { toast.info('没有可撤销的操作'); return; }
-        futureRef.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+        futureRef.current.push({ nodes: [...nodesRef.current], edges: [...edgesRef.current] });
         setNodes(prev.nodes);
         setEdges(prev.edges);
     }, [setNodes, setEdges]);
@@ -167,7 +170,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     const redo = useCallback(() => {
         const next = futureRef.current.pop();
         if (!next) { toast.info('没有可重做的操作'); return; }
-        historyRef.current.push({ nodes: nodesRef.current, edges: edgesRef.current });
+        historyRef.current.push({ nodes: [...nodesRef.current], edges: [...edgesRef.current] });
         setNodes(next.nodes);
         setEdges(next.edges);
     }, [setNodes, setEdges]);
@@ -361,24 +364,23 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                     document.activeElement instanceof HTMLTextAreaElement ||
                     (document.activeElement as HTMLElement)?.isContentEditable
                 ) return;
-                setClipboard((cb) => {
-                    if (cb.length === 0) return cb;
-                    e.preventDefault();
-                    pushHistory();
-                    const offset = 40;
-                    const newNodes = cb.map((n) => ({
-                        ...n,
-                        id: genId('node'),
-                        position: { x: n.position.x + offset, y: n.position.y + offset },
-                        data: { ...n.data, isRoot: false },
-                        selected: true,
-                    }));
-                    setNodes((nds) => [
-                        ...nds.map((n) => ({ ...n, selected: false })),
-                        ...newNodes,
-                    ]);
-                    return cb; // 保持剪贴板内容，允许多次粘贴
-                });
+                // 通过 clipboardRef 读取最新剪贴板，避免在 state updater 内调用 e.preventDefault()（在 StrictMode 双调用下不安全）
+                const cb = clipboardRef.current;
+                if (cb.length === 0) return;
+                e.preventDefault();
+                pushHistory();
+                const offset = 40;
+                const newNodes = cb.map((n) => ({
+                    ...n,
+                    id: genId('node'),
+                    position: { x: n.position.x + offset, y: n.position.y + offset },
+                    data: { ...n.data, isRoot: false },
+                    selected: true,
+                }));
+                setNodes((nds) => [
+                    ...nds.map((n) => ({ ...n, selected: false })),
+                    ...newNodes,
+                ]);
                 return;
             }
 
@@ -442,6 +444,13 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         return () => container?.removeEventListener('keydown', handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reLayout, setNodes, setEdges, undo, redo, pushHistory, setClipboard]); // 不依赖 nodes/edges，通过 ref 读取最新值
+
+    // 组件卸载时清理 layout 防抖定时器，防止在已卸载组件上调用 setNodes 触发 React 警告
+    useEffect(() => {
+        return () => {
+            if (layoutDebounceRef.current) clearTimeout(layoutDebounceRef.current);
+        };
+    }, []);
 
     // ─── 监听 ReactFlow 节点尺寸变化事件，精确触发重新布局 ─────────────────────────
     // ReactFlow 在测量到节点真实 DOM 尺寸后，会通过 onNodesChange 发出 type='dimensions' 变更。

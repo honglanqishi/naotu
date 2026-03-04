@@ -3,7 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tags } from '../db/schema.js';
+import { tags, generateId } from '../db/tables.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 
 const createTagSchema = z.object({
@@ -34,7 +34,7 @@ tagsRoutes.post('/', zValidator('json', createTagSchema), async (c) => {
 
     const [tag] = await db
         .insert(tags)
-        .values({ name, color, userId: user.id })
+        .values({ id: generateId(), name, color, userId: user.id })
         .returning();
 
     return c.json({ tag }, 201);

@@ -3,7 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { eq, and, desc } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { mindmaps } from '../db/schema.js';
+import { mindmaps, generateId } from '../db/tables.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 
 // Zod Schemas
@@ -84,6 +84,7 @@ mapsRoutes.post('/', zValidator('json', createMapSchema), async (c) => {
     const [map] = await db
         .insert(mindmaps)
         .values({
+            id: generateId(),
             title,
             description,
             userId: user.id,

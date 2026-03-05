@@ -114,6 +114,30 @@ export const mindmapsTags = pgTable(
     (table) => [primaryKey({ columns: [table.mindmapId, table.tagId] })]
 );
 
+export const todoReminders = pgTable(
+    'todo_reminders',
+    {
+        id: uuid('id').primaryKey().defaultRandom(),
+        mindmapId: uuid('mindmap_id')
+            .notNull()
+            .references(() => mindmaps.id, { onDelete: 'cascade' }),
+        nodeId: text('node_id').notNull(),
+        email: text('email').notNull(),
+        title: text('title').notNull(),
+        remindAt: timestamp('remind_at').notNull(),
+        status: text('status', { enum: ['pending', 'processing', 'sent', 'failed'] })
+            .notNull()
+            .default('pending'),
+        notes: text('notes'),
+        createdAt: timestamp('created_at').notNull().defaultNow(),
+        updatedAt: timestamp('updated_at').notNull().defaultNow(),
+    },
+    (table) => [
+        index('todo_reminders_remind_at_idx').on(table.remindAt),
+        index('todo_reminders_status_idx').on(table.status),
+    ]
+);
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
     mindmaps: many(mindmaps),
@@ -125,6 +149,7 @@ export const usersRelations = relations(users, ({ many }) => ({
 export const mindmapsRelations = relations(mindmaps, ({ one, many }) => ({
     user: one(users, { fields: [mindmaps.userId], references: [users.id] }),
     mindmapsTags: many(mindmapsTags),
+    todoReminders: many(todoReminders),
 }));
 
 export const tagsRelations = relations(tags, ({ one, many }) => ({
@@ -137,7 +162,13 @@ export const mindmapsTagsRelations = relations(mindmapsTags, ({ one }) => ({
     tag: one(tags, { fields: [mindmapsTags.tagId], references: [tags.id] }),
 }));
 
+export const todoRemindersRelations = relations(todoReminders, ({ one }) => ({
+    mindmap: one(mindmaps, { fields: [todoReminders.mindmapId], references: [mindmaps.id] }),
+}));
+
 // Types
 export type User = typeof users.$inferSelect;
 export type MindMap = typeof mindmaps.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
+export type TodoReminder = typeof todoReminders.$inferSelect;
+export type NewTodoReminder = typeof todoReminders.$inferInsert;

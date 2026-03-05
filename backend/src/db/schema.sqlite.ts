@@ -131,6 +131,33 @@ export const mindmapsTags = sqliteTable(
 );
 
 // =============================================
+// TodoReminders 待办提醒表
+// =============================================
+export const todoReminders = sqliteTable(
+    'todo_reminders',
+    {
+        id: text('id').primaryKey(),
+        mindmapId: text('mindmap_id')
+            .notNull()
+            .references(() => mindmaps.id, { onDelete: 'cascade' }),
+        nodeId: text('node_id').notNull(),
+        email: text('email').notNull(),
+        title: text('title').notNull(),
+        remindAt: integer('remind_at', { mode: 'timestamp' }).notNull(),
+        status: text('status', { enum: ['pending', 'processing', 'sent', 'failed'] })
+            .notNull()
+            .default('pending'),
+        notes: text('notes'),
+        createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+        updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    },
+    (table) => [
+        index('todo_reminders_remind_at_idx').on(table.remindAt),
+        index('todo_reminders_status_idx').on(table.status),
+    ]
+);
+
+// =============================================
 // Relations（用于 Drizzle 关联查询）
 // =============================================
 export const usersRelations = relations(users, ({ many }) => ({
@@ -143,6 +170,7 @@ export const usersRelations = relations(users, ({ many }) => ({
 export const mindmapsRelations = relations(mindmaps, ({ one, many }) => ({
     user: one(users, { fields: [mindmaps.userId], references: [users.id] }),
     mindmapsTags: many(mindmapsTags),
+    todoReminders: many(todoReminders),
 }));
 
 export const tagsRelations = relations(tags, ({ one, many }) => ({
@@ -155,7 +183,13 @@ export const mindmapsTagsRelations = relations(mindmapsTags, ({ one }) => ({
     tag: one(tags, { fields: [mindmapsTags.tagId], references: [tags.id] }),
 }));
 
+export const todoRemindersRelations = relations(todoReminders, ({ one }) => ({
+    mindmap: one(mindmaps, { fields: [todoReminders.mindmapId], references: [mindmaps.id] }),
+}));
+
 // Types
 export type User = typeof users.$inferSelect;
 export type MindMap = typeof mindmaps.$inferSelect;
 export type Tag = typeof tags.$inferSelect;
+export type TodoReminder = typeof todoReminders.$inferSelect;
+export type NewTodoReminder = typeof todoReminders.$inferInsert;

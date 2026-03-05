@@ -19,3 +19,5 @@ if (httpsProxy) {
 } else if (process.env.NODE_ENV !== 'production') {
     console.log('[proxy] No HTTPS_PROXY set. If Google OAuth fails, add HTTPS_PROXY=http://127.0.0.1:7890 to .env');
 }
+
+export {};

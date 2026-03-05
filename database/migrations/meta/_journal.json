@@ -15,6 +15,13 @@
       "when": 1772530097837,
       "tag": "0001_add_account_token_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1772726400000,
+      "tag": "0002_add_todo_reminders",
+      "breakpoints": true
     }
   ]
 }

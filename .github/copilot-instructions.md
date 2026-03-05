@@ -11,7 +11,7 @@
 - 完成了 Figma 还原任务并遇到了新问题
 
 更新操作：
-1. 将 bug / 陷阱追加到 **「已知 Bug 与陷阱清单」** 表格（现象 / 根因 / 解决方案三列）
+1. 将 bug / 陷阱追加到 D:\naotu\.github\bug-list.md **「已知 Bug 与陷阱清单」** 表格（现象 / 根因 / 解决方案三列）
 2. 将架构变化更新到对应章节
 3. 在文件末尾追加一行 `> 最后更新：{日期} | {本次变更摘要}`
 
@@ -76,6 +76,13 @@ npm run migrate        # PostgreSQL（生产）
 - 前端数据请求统一用 **TanStack Query**（`useQuery` / `useMutation`）；`api.ts` 的 axios 实例为唯一 HTTP 入口。
 - Zustand store（`frontend/src/store/authStore.ts`）仅存 UI 状态（auth loading）；服务端数据用 TanStack Query 缓存。
 
+## 待办提醒系统
+
+- 数据落库：`todo_reminders`（`database/src/schema.ts` + `database/src/schema.sqlite.ts`，并同步 `backend/src/db/` 镜像）。
+- 同步入口：保存导图时在 `backend/src/routes/maps.ts` 的 `syncReminders()` 从 `node.data.decorations.todo` 提取提醒（兼容旧 `node.data.todo`）。
+- worker：`backend/src/workers/reminder.worker.ts` 每分钟扫描 `pending` 且到期的提醒，先抢占为 `processing`，发信后更新 `sent/failed`。
+- 邮件：`backend/src/services/email.service.ts` 使用 nodemailer，邮件模板必须对用户输入做 HTML 转义。
+
 ## 项目约定
 
 - 前端组件：小文件、单一职责，`'use client'` 最小化范围，优先 Server Component。
@@ -85,6 +92,8 @@ npm run migrate        # PostgreSQL（生产）
 - 生产部署：Docker Compose + Nginx 反向代理，SSL 用 Let's Encrypt。
 
 ---
+
+> 最后更新：2026-03-05 | 修复提醒同步字段不一致、提醒枚举归一化、XSS 防护与 worker 抢占发送
 
 ## Figma 设计稿还原（1:1 实现）
 
@@ -151,24 +160,3 @@ cd D:\naotu\frontend ; npx tsc --noEmit 2>&1 | Select-Object -First 40
 ```
 
 ---
-
-## 已知 Bug 与陷阱清单
-
-> 避免重复踩坑，遇到以下现象请直接查表。
-
-| 现象 | 根因 | 解决方案 |
-|---|---|---|
-| `get_design_context` 内容不完整 | 节点过大被 MCP 裁剪 | 加 `forceCode: true` 参数 |
-| 装饰图片 404 / 显示空白 | 直接用了 `localhost:3845` URL 作为 src | 必须下载到 `public/images/` 再引用 |
-| 图片定位偏移 | 父容器缺少 `position: relative` | 确保所有绝对定位的父容器有 `relative` |
-| 图片变形 | 未设置 object-fit | 加 `object-contain` 或 `object-cover` |
-| Tailwind CSS 不生效 | 缺少 `postcss.config.mjs` | `export default { plugins: { '@tailwindcss/postcss': {} } }` |
-| inset 负值内容溢出 | Figma 元素超出画框时的正常输出 | 外层正常定位 + 内层负值 inset 嵌套修正 |
-| 页面渲染空白（Application error） | Next.js 热更新瞬态错误 | 手动刷新或重新导航，非代码问题 |
-| 后端 401 硬刷新导致编辑内容丢失 | `window.location.href` 强制跳转 | 已改为派发 `auth:unauthorized` 事件 + 软跳转，禁止在 axios 拦截器里用 href |
-| `nodeTypes`/`edgeTypes` 导致节点频繁重建 | 定义在组件内部，每次渲染重新创建 | 必须定义在组件外部（已在 MapEditor.tsx 实现） |
-| 数据库 schema 两套不同步 | Docker 路径隔离，不能 import 跨包 | `backend/src/db/schema.ts` 与 `database/src/schema.ts` 手动同步 |
-| CORS 请求被拒绝 | 误用 `BETTER_AUTH_URL` 作为 CORS origin | CORS origin 只能用 `FRONTEND_URL` |
-| bootstrap.ts 代理不生效 | 没有在第一行导入 | `backend/src/index.ts` 第二行必须是 `import './bootstrap.js'` |
-
-> 最后更新：2026-03-04 | 新增 AI 自维护规则、Figma 还原流程、11 条 Bug 陷阱清单

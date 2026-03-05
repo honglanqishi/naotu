@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { signIn, signUp } from '@/lib/auth-client';
 import { toast } from 'sonner';
 import Image from 'next/image';
@@ -10,6 +11,8 @@ export function LoginForm() {
     // Google OAuth 的 loadingProvider 保留在全局 store（连接平台级），
     // 邮符1登录/注册的 pending 状态改用局部 useState 维护，避免全局状态交叉污染。
     const { loadingProvider, setAuthLoading } = useAuthStore();
+    const searchParams = useSearchParams();
+    const callbackUrl = searchParams.get('callbackUrl') || '/dashboard';
     const [isLoading, setIsLoading] = useState(false);
     const [isSignUp, setIsSignUp] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
@@ -29,7 +32,7 @@ export function LoginForm() {
                 name: name.trim(),
                 email,
                 password,
-                callbackURL: '/dashboard',
+                callbackURL: callbackUrl,
             });
             if (result?.error) {
                 console.error('[Auth] Email sign-up error:', result.error);
@@ -50,11 +53,11 @@ export function LoginForm() {
             const result = await signIn.email({
                 email,
                 password,
-                callbackURL: '/dashboard',
+                callbackURL: callbackUrl,
             });
             if (result?.error) {
                 console.error('[Auth] Email sign-in error:', result.error);
-                toast.error(result.error.message || '邮符1或密码错误，请重试');
+                toast.error(result.error.message || '邮箱或密码错误，请重试');
                 setIsLoading(false);
             }
         } catch (err) {
@@ -69,7 +72,7 @@ export function LoginForm() {
         try {
             const result = await signIn.social({
                 provider: 'google',
-                callbackURL: `${window.location.origin}/dashboard`,
+                callbackURL: `${window.location.origin}${callbackUrl}`,
             });
             if (result?.error) {
                 console.error('[Auth] Google sign-in error:', result.error);

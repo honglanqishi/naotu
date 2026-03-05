@@ -19,6 +19,10 @@ api.interceptors.response.use(
             if (typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent('auth:unauthorized'));
             }
+        } else if (!error.response || error.response?.status === 500 || error.response?.status === 502 || error.response?.status === 504) {
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('auth:network_error'));
+            }
         }
         return Promise.reject(error);
     }

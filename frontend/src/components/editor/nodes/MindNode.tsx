@@ -2,7 +2,36 @@
 
 import { memo, useCallback, useRef, useState, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Handle, Position, useReactFlow, useEdges, type NodeProps } from '@xyflow/react';
+import { Handle, Position, NodeToolbar, useReactFlow, useEdges, type NodeProps } from '@xyflow/react';
+import { RichTextToolbar } from '@/components/editor/RichTextToolbar';
+import { useSession } from '@/lib/auth-client';
+import { CommentPopover } from '../decorations/CommentPopover';
+import { NotePopover } from '../decorations/NotePopover';
+import { TagPopover } from '../decorations/TagPopover';
+import { TodoCheckbox } from '../decorations/TodoCheckbox';
+
+export interface TodoReminder {
+  email: string;
+  title: string;
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+  remind: string;
+  notes?: string;
+}
+
+export interface NodeDecoration {
+  comment?: { id: string; text: string; author: string; createdAt: number }[];
+  note?: string;
+  icon?: string;
+  tags?: { text: string; color: string }[];
+  task?: { title: string; status: 'todo' | 'in-progress' | 'done' };
+  attachment?: { name: string; url: string; type: string };
+  todo?: { checked: boolean; reminder?: TodoReminder };
+  hyperlink?: { url: string; label?: string; mapId?: string };
+  highlight?: string;
+}
 
 export interface MindNodeData extends Record<string, unknown> {
   /** 纯文本内容（用于布局计算、旧节点兼容、搜索等） */
@@ -15,6 +44,14 @@ export interface MindNodeData extends Record<string, unknown> {
   side?: 'left' | 'right';
   /** 是否折叠子节点 */
   collapsed?: boolean;
+  /** 节点装饰（附加信息） */
+  decorations?: NodeDecoration;
+  /** 节点背景色 */
+  bgColor?: string;
+  /** 节点边框色 */
+  borderColor?: string;
+  /** 是否处于下钻状态的根节点 */
+  isDrillRoot?: boolean;
 }
 
 /** 将纯文本安全转义为内联 HTML（保留换行） */
@@ -26,29 +63,64 @@ function escapeHtml(text: string): string {
     .replace(/\n/g, '<br>');
 }
 
-/**
- * 简单 HTML 消洁：删除 <script>、on* 事件属性、javascript: 协议。
- * 保留 <br>、<b>、<i>、<u> 等安全内联格式化标签，不引入外部依赖。
- */
 function sanitizeHtml(html: string): string {
   return html
-    // 删除 <script>...</script> 及内容
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    // 删除 on* 事件属性（onclick="..."、onmouseover="..." 等）
-    .replace(/\bon\w+\s*=\s*(["'])[^"']*\1/gi, '')
-    // 删除 javascript: 协议（href="javascript:..."、src="javascript:..." 等）
-    .replace(/javascript\s*:/gi, '');
+    .replace(/\bon\w+\s*=\s*("[^"]*"|'[^']*')/gi, '')
+    .replace(/javascript\s*:/gi, '')
+    .replace(/data\s*:\s*text\/html/gi, '');
 }
 
 /** 节点状态机: normal → editing → normal */
 type EditState = 'normal' | 'editing';
 
+// ── 装饰图标配置 ──────────────────────────────────────────────
+const DECORATION_ICONS: { key: keyof NodeDecoration; emoji: string; title: string }[] = [
+  { key: 'comment', emoji: '💬', title: '评论' },
+  { key: 'note', emoji: '📝', title: '注释' },
+  { key: 'icon', emoji: '🎯', title: '图标' },
+  { key: 'tags', emoji: '🏷️', title: '标签' },
+  { key: 'task', emoji: '📋', title: '任务' },
+  { key: 'attachment', emoji: '📎', title: '附件' },
+  { key: 'todo', emoji: '☑️', title: '待办' },
+  { key: 'hyperlink', emoji: '🔗', title: '超链接' },
+];
+
 export function MindNodeComponent({ id, data, selected }: NodeProps) {
   const nodeData = data as MindNodeData;
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData, getNodes } = useReactFlow();
   const allEdges = useEdges();
   const [editState, setEditState] = useState<EditState>('normal');
   const editorRef = useRef<HTMLDivElement>(null);
+  const { data: session } = useSession();
+
+  // 控制各气泡的弹出状态
+  const [activePopover, setActivePopover] = useState<'comment' | 'note' | 'tags' | null>(null);
+
+  // 监听来自菜单的外部激活事件
+  useEffect(() => {
+    const handleEditDeco = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.nodeId === id) {
+        setActivePopover(detail.decorationType as 'comment' | 'note' | 'tags');
+      }
+    };
+    window.addEventListener('mindmap-edit-decoration', handleEditDeco);
+    return () => window.removeEventListener('mindmap-edit-decoration', handleEditDeco);
+  }, [id]);
+
+  // 全局提取已用标签池
+  const availableTags = useMemo(() => {
+    const map = new Map();
+    getNodes().forEach(n => {
+      const tgs: { text: string, color: string }[] | undefined = (n.data as MindNodeData)?.decorations?.tags;
+      tgs?.forEach(t => {
+        if (!map.has(t.text)) map.set(t.text, { id: t.text, text: t.text, color: t.color });
+      });
+    });
+    return Array.from(map.values());
+  }, [getNodes, activePopover]); // 当气泡弹出或节点变化时重新计算
+
 
   // ── 图片全屏预览状态 ─────────────────────────────────────────
   const [fullscreenImg, setFullscreenImg] = useState<string | null>(null);
@@ -58,7 +130,6 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
   const imgDragRef = useRef({ startX: 0, startY: 0, startOffX: 0, startOffY: 0 });
 
   // 计算该节点是否有子节点（层级连接）
-  // 使用 useEdges 保持响应式，边变化时自动更新
   const hasChildren = useMemo(
     () => allEdges.some((e) => e.source === id && (e.type === 'hierarchyEdge' || !e.type)),
     [id, allEdges],
@@ -67,12 +138,12 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
   const collapsed = !!nodeData.collapsed;
 
   /** 当前节点应展示的 HTML（优先 html 字段，降级为转义后的纯文本） */
-  const displayHtml = nodeData.html ?? escapeHtml(nodeData.label);
+  const displayHtml = sanitizeHtml(nodeData.html ?? escapeHtml(nodeData.label));
 
-  // ── 非编辑态时同步 innerHTML（先清洁再赋値，useLayoutEffect 避免闪烁） ──────────────────
+  // ── 非编辑态时同步 innerHTML（useLayoutEffect 避免闪烁） ──────────────────
   useLayoutEffect(() => {
     if (editState === 'normal' && editorRef.current) {
-      editorRef.current.innerHTML = sanitizeHtml(displayHtml);
+      editorRef.current.innerHTML = displayHtml;
     }
   }, [editState, displayHtml]);
 
@@ -119,17 +190,19 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
     };
   }, [fullscreenImg]);
 
-  /** 提交编辑：保存 HTML + 提取纯文本 label。
-   * 尺寸刷新由 ReactFlow 的 dimensions 事件自动触发 MapEditor 重新布局，无需手动 dispatch。
-   */
+  /** 提交编辑：保存 HTML + 提取纯文本 label。 */
   const commitEdit = useCallback(() => {
     if (!editorRef.current) return;
-    // 先清洁 HTML 再保存，防止用户粘贴恶意内容导致 XSS
     const newHtml = sanitizeHtml(editorRef.current.innerHTML);
     const newLabel = (editorRef.current.innerText ?? '').trim() || nodeData.label;
     updateNodeData(id, { label: newLabel, html: newHtml });
     setEditState('normal');
   }, [id, nodeData.label, updateNodeData]);
+
+  /** 进入编辑态 */
+  const enterEdit = useCallback(() => {
+    setEditState('editing');
+  }, []);
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -176,19 +249,17 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
       // Enter：提交并退出编辑；Alt+Enter：插入换行
       if (e.key === 'Enter') {
         if (e.altKey) {
-          // Alt+Enter：论入换行符
           e.preventDefault();
           // eslint-disable-next-line @typescript-eslint/no-deprecated
           document.execCommand('insertLineBreak', false);
           return;
         }
-        // 普通 Enter：提交并退出编辑
         e.preventDefault();
         commitEdit();
         return;
       }
 
-      // Escape：保持内容提交并退出编辑，同时刺激布局刷新
+      // Escape：保持内容提交并退出编辑
       if (e.key === 'Escape') {
         e.preventDefault();
         commitEdit();
@@ -213,7 +284,6 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
             // eslint-disable-next-line @typescript-eslint/no-deprecated
             document.execCommand('underline', false);
             return;
-          // Ctrl+C/V/Z 交给浏览器默认行为（contentEditable 内部剪贴板/撤销）
         }
       }
     },
@@ -230,14 +300,42 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
   );
 
   const isRoot = nodeData.isRoot;
+  const isDrillRoot = nodeData.isDrillRoot;
   const isDropTarget = nodeData.isDropTarget;
-  // side='left' 表示节点在根节点左侧：父节点在右，子节点继续向左
   const isLeftSide = nodeData.side === 'left';
   const targetPos = isLeftSide ? Position.Right : Position.Left;
   const sourcePos = isLeftSide ? Position.Left : Position.Right;
 
+  // ── 装饰数据 ─────────────────────────────────────────────────
+  const decorations = nodeData.decorations;
+  const hasDecorations = activePopover !== null || (decorations && Object.keys(decorations).some((k) => {
+    const val = decorations[k as keyof NodeDecoration];
+    if (val === undefined || val === null || val === '') return false;
+    if (Array.isArray(val) && val.length === 0) return false;
+    return true;
+  }));
+
+  // 高亮边框色（来自装饰或自定义）
+  const highlightColor = decorations?.highlight;
+  const customBorderColor = nodeData.borderColor || highlightColor;
+  const customBgColor = nodeData.bgColor;
+
   return (
     <>
+      {/* ── 富文本工具栏（NodeToolbar：选中或编辑时显示） ────────── */}
+      <NodeToolbar
+        isVisible={!!(selected || editState === 'editing')}
+        position={Position.Top}
+        offset={12}
+        align="center"
+      >
+        <RichTextToolbar
+          editorRef={editorRef}
+          isEditing={editState === 'editing'}
+          onEnterEdit={enterEdit}
+        />
+      </NodeToolbar>
+
       {/* 输入连接 handle（根节点无输入） */}
       {!isRoot && (
         <Handle
@@ -252,8 +350,7 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
         />
       )}
 
-      {/* 节点主体（尺寸随内容自动撑开） */}
-      {/* 编辑态加 nodrag nopan，防止 ReactFlow 拦截鼠标，确保文本可自由选取 */}
+      {/* 节点主体 */}
       <div
         onDoubleClick={handleDoubleClick}
         className={editState === 'editing' ? 'nodrag nopan' : undefined}
@@ -263,23 +360,29 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
           minHeight: isRoot ? 36 : 28,
           padding: isRoot ? '8px 20px' : '6px 14px',
           borderRadius: isRoot ? 20 : 12,
-          background: isRoot
-            ? 'linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 70%, #8b5cf6))'
-            : 'rgba(26,26,46,0.95)',
+          background: customBgColor
+            ? customBgColor
+            : isRoot
+              ? 'linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 70%, #8b5cf6))'
+              : 'rgba(26,26,46,0.95)',
           border: isDropTarget
             ? '2px solid #f59e0b'
-            : selected
-              ? '2px solid var(--primary)'
-              : isRoot
-                ? '2px solid transparent'
-                : '1.5px solid rgba(255,255,255,0.12)',
+            : customBorderColor
+              ? `2px solid ${customBorderColor}`
+              : selected
+                ? '2px solid var(--primary)'
+                : isRoot
+                  ? '2px solid transparent'
+                  : '1.5px solid rgba(255,255,255,0.12)',
           boxShadow: isDropTarget
             ? '0 0 0 4px rgba(245,158,11,0.25)'
-            : selected
-              ? '0 0 0 3px rgba(var(--primary-rgb, 99,102,241),0.25)'
-              : isRoot
-                ? '0 4px 24px rgba(0,0,0,0.4)'
-                : '0 2px 8px rgba(0,0,0,0.3)',
+            : highlightColor
+              ? `0 0 0 3px ${highlightColor}40`
+              : selected
+                ? '0 0 0 3px rgba(var(--primary-rgb, 99,102,241),0.25)'
+                : isRoot
+                  ? '0 4px 24px rgba(0,0,0,0.4)'
+                  : '0 2px 8px rgba(0,0,0,0.3)',
           transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
           cursor: editState === 'editing' ? 'text' : 'default',
           userSelect: editState === 'editing' ? 'text' : 'none',
@@ -287,17 +390,49 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
           overflow: 'visible',
           boxSizing: 'border-box',
           display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        {/*
-         * 富文本编辑区（展示和编辑共用同一 div，避免状态切换闪烁）
-         * - 非编辑态：contentEditable=false，内容由 useLayoutEffect 通过 innerHTML 管理
-         * - 编辑态：contentEditable=true，内容由浏览器接管，React 不干预
-         * suppressContentEditableWarning 抑制 React 的 children 警告
-         * 支持格式化：Ctrl+B 加粗、Ctrl+I 斜体、Ctrl+U 下划线、Enter 换行、Escape 取消
-         */}
+        {/* 下钻返回按钮 */}
+        {isDrillRoot && (
+          <div
+            className="nodrag nopan"
+            style={{
+              position: 'absolute',
+              top: -28,
+              left: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '3px 8px',
+              background: 'rgba(99,102,241,0.2)',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 11,
+              color: 'var(--primary)',
+              border: '1px solid rgba(99,102,241,0.3)',
+              whiteSpace: 'nowrap',
+              transition: 'background 0.15s',
+            }}
+            title="返回上级"
+            onClick={(e) => {
+              e.stopPropagation();
+              // drillUp 通过自定义事件通知 MapEditor
+              window.dispatchEvent(new CustomEvent('mindmap-drill-up'));
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(99,102,241,0.35)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(99,102,241,0.2)'; }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+            返回上级
+          </div>
+        )}
+
+        {/* 富文本编辑区 */}
         <div
           ref={editorRef}
           contentEditable={editState === 'editing'}
@@ -318,6 +453,242 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
             width: '100%',
           }}
         />
+
+        {/* 装饰行（在节点下方或内部） */}
+        {hasDecorations && editState === 'normal' && (
+          <div
+            className="nodrag nopan"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              marginTop: 4,
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+            }}
+          >
+            {DECORATION_ICONS.map(({ key, emoji, title }) => {
+              const val = decorations?.[key as keyof NodeDecoration];
+              if (activePopover !== key) {
+                if (val === undefined || val === null || val === '') return null;
+                if (Array.isArray(val) && val.length === 0) return null;
+              }
+
+              // 对不同类型的装饰图标定义触发元素
+              let iconElement: React.ReactNode = null;
+
+              if (key === 'tags') {
+                let tagList = (val as any[]) || [];
+                // 兼容旧的 string[] 数据
+                if (tagList.length > 0 && typeof tagList[0] === 'string') {
+                  tagList = tagList.map(t => ({ text: t, color: '#3b82f6' }));
+                }
+
+                iconElement = (
+                  <div className="flex gap-1 items-center min-h-[16px]" onClick={(e) => { e.stopPropagation(); setActivePopover('tags'); }}>
+                    {tagList.length === 0 && activePopover === 'tags' && (
+                      <span style={{ fontSize: 12, padding: '1px 3px', borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>🏷️</span>
+                    )}
+                    {tagList.map(t => (
+                      <span
+                        key={t.text}
+                        style={{
+                          backgroundColor: t.color,
+                          color: 'white',
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                        }}
+                        className="opacity-90 hover:opacity-100 hover:scale-105 transition-all shadow-sm"
+                      >
+                        {t.text}
+                      </span>
+                    ))}
+                  </div>
+                );
+              } else if (key === 'todo') {
+                const todoData = (val as { checked: boolean; reminder?: any }) || { checked: false };
+                iconElement = (
+                  <TodoCheckbox
+                    checked={!!todoData.checked}
+                    reminder={todoData.reminder}
+                    onToggle={() => {
+                      updateNodeData(id, { decorations: { ...decorations, todo: { ...todoData, checked: !todoData.checked } } });
+                    }}
+                    onRemove={() => {
+                      const next = { ...decorations };
+                      delete next.todo;
+                      updateNodeData(id, { decorations: next });
+                    }}
+                    onSetReminder={(reminder) => {
+                      updateNodeData(id, { decorations: { ...decorations, todo: { ...todoData, reminder } } });
+                    }}
+                    onRemoveReminder={() => {
+                      const { reminder: _r, ...rest } = todoData;
+                      updateNodeData(id, { decorations: { ...decorations, todo: rest } });
+                    }}
+                  />
+                );
+              } else {
+                let comments = (decorations!.comment as any) || [];
+                // 兼容旧的 string 数据
+                if (typeof comments === 'string') {
+                  comments = [{ id: Date.now().toString(), text: comments, author: '我', createdAt: Date.now() }];
+                } else if (!Array.isArray(comments)) {
+                  comments = [];
+                }
+
+                let displayTitle = title;
+                if (key === 'comment' && comments.length > 0) {
+                  displayTitle = `评论 (${comments.length})`;
+                }
+
+                const hasCustomTooltip = key === 'comment' || key === 'note';
+
+                iconElement = (
+                  <span
+                    title={hasCustomTooltip ? undefined : displayTitle}
+                    className="group relative"
+                    style={{
+                      fontSize: 12,
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                      borderRadius: 4,
+                      background: 'rgba(255,255,255,0.08)',
+                      transition: 'background 0.12s',
+                      lineHeight: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.2)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.08)'; }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // 对受支持的高级类型，直接由当前节点挂载的 Popover 处理
+                      if (['comment', 'note', 'tags'].includes(key)) {
+                        setActivePopover(key as 'comment' | 'note' | 'tags');
+                      } else {
+                        // 其他暂未高级重构的类型，可通过原事件派发
+                        window.dispatchEvent(new CustomEvent('mindmap-edit-decoration', {
+                          detail: { nodeId: id, decorationType: key },
+                        }));
+                      }
+                    }}
+                  >
+                    {emoji}
+                    {key === 'comment' && comments.length > 0 && <span className="text-[10px] text-white/80">{comments.length}</span>}
+
+                    {/* CUSTOM TOOLTIP CONTENT */}
+                    {key === 'comment' && comments.length > 0 && (
+                      <div className="absolute left-1/2 bottom-[calc(100%+8px)] -translate-x-1/2 w-[280px] bg-white rounded-lg shadow-[0_4px_24px_rgba(0,0,0,0.12)] border border-gray-100 p-3 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-[100] text-left cursor-default flex flex-col gap-2">
+                        {comments.map((c: any, i: number) => (
+                          <div key={i} className="flex flex-col gap-1 text-sm border-b border-gray-100 last:border-0 pb-2 last:pb-0">
+                            <div className="flex justify-between items-center text-xs text-gray-400">
+                              <span className="font-medium text-gray-600 flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-primary/70"></span>
+                                {c.author}
+                              </span>
+                              <span>{new Date(c.createdAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}</span>
+                            </div>
+                            <div className="text-gray-700 leading-snug whitespace-pre-wrap">{c.text}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {key === 'note' && typeof decorations!.note === 'string' && decorations!.note.trim().length > 0 && (
+                      <div className="absolute left-1/2 bottom-[calc(100%+8px)] -translate-x-1/2 w-[350px] bg-white rounded-lg shadow-[0_4px_24px_rgba(0,0,0,0.12)] border border-gray-100 p-4 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-[100] text-left overflow-hidden">
+                        <div
+                          className="text-sm text-gray-700 font-normal leading-relaxed overflow-hidden"
+                          style={{ display: '-webkit-box', WebkitLineClamp: 8, WebkitBoxOrient: 'vertical' }}
+                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(decorations!.note || '') }}
+                        />
+                      </div>
+                    )}
+                  </span>
+                );
+              }
+
+              return (
+                <div key={key} className="relative">
+                  {/* 根据类型包裹对应的 Popover */}
+                  {key === 'comment' ? (
+                    <CommentPopover
+                      open={activePopover === 'comment'}
+                      onOpenChange={(op) => setActivePopover(op ? 'comment' : null)}
+                      trigger={iconElement}
+                      comments={typeof decorations!.comment === 'string'
+                        ? [{ id: Date.now().toString(), text: decorations!.comment, author: '我', createdAt: Date.now() }]
+                        : Array.isArray(decorations!.comment) ? decorations!.comment : []}
+                      onAdd={(text) => {
+                        const currentComments = typeof decorations!.comment === 'string'
+                          ? [{ id: Date.now().toString(), text: decorations!.comment, author: '我', createdAt: Date.now() }]
+                          : Array.isArray(decorations!.comment) ? decorations!.comment : [];
+                        const newComment = { id: Date.now().toString(), text, author: session?.user?.name || session?.user?.email?.split('@')[0] || '我', createdAt: Date.now() };
+                        updateNodeData(id, { decorations: { ...decorations, comment: [...currentComments, newComment] } });
+                      }}
+                      onUpdate={(cid, text) => {
+                        const currentComments = typeof decorations!.comment === 'string'
+                          ? [{ id: Date.now().toString(), text: decorations!.comment, author: '我', createdAt: Date.now() }]
+                          : Array.isArray(decorations!.comment) ? decorations!.comment : [];
+                        updateNodeData(id, { decorations: { ...decorations, comment: currentComments.map(c => c.id === cid ? { ...c, text } : c) } });
+                      }}
+                      onDelete={(cid) => {
+                        const currentComments = typeof decorations!.comment === 'string'
+                          ? [{ id: Date.now().toString(), text: decorations!.comment, author: '我', createdAt: Date.now() }]
+                          : Array.isArray(decorations!.comment) ? decorations!.comment : [];
+                        const next = currentComments.filter(c => c.id !== cid);
+                        updateNodeData(id, { decorations: { ...decorations, comment: next.length ? next : undefined } });
+                        if (!next.length) setActivePopover(null);
+                      }}
+                    />
+                  ) : key === 'todo' ? (
+                    // TodoCheckbox 自管理所有交互，不需要 Popover 包裹
+                    iconElement
+                  ) : key === 'note' ? (
+                    <NotePopover
+                      open={activePopover === 'note'}
+                      onOpenChange={(op) => setActivePopover(op ? 'note' : null)}
+                      trigger={iconElement}
+                      note={decorations!.note || ''}
+                      onSave={(html) => {
+                        updateNodeData(id, { decorations: { ...decorations, note: sanitizeHtml(html) } });
+                      }}
+                    />
+                  ) : key === 'tags' ? (
+                    <TagPopover
+                      open={activePopover === 'tags'}
+                      onOpenChange={(op) => setActivePopover(op ? 'tags' : null)}
+                      trigger={iconElement}
+                      nodeTags={(decorations!.tags || []).map((t: any) => typeof t === 'string' ? t : t.text)}
+                      availableTags={availableTags}
+                      onAddTag={(text, color) => {
+                        let curr: { text: string, color: string }[] = [];
+                        if (Array.isArray(decorations!.tags)) {
+                          curr = decorations!.tags.map(t => typeof t === 'string' ? { text: t, color: '#3b82f6' } : t);
+                        }
+                        if (!curr.find(t => t.text === text)) {
+                          updateNodeData(id, { decorations: { ...decorations, tags: [...curr, { text, color }] } });
+                        }
+                      }}
+                      onRemoveTag={(text) => {
+                        let curr: { text: string, color: string }[] = [];
+                        if (Array.isArray(decorations!.tags)) {
+                          curr = decorations!.tags.map(t => typeof t === 'string' ? { text: t, color: '#3b82f6' } : t);
+                        }
+                        const next = curr.filter(t => t.text !== text);
+                        updateNodeData(id, { decorations: { ...decorations, tags: next.length ? next : undefined } });
+                        if (!next.length) setActivePopover(null);
+                      }}
+                    />
+                  ) : iconElement}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* 吸附指示环 */}
         {isDropTarget && (
@@ -395,7 +766,7 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
         }}
       />
 
-      {/* 图片全屏预览 Portal：可拖动、Esc 关闭、点击功画外关闭 */}
+      {/* 图片全屏预览 Portal */}
       {fullscreenImg && typeof document !== 'undefined' && createPortal(
         <div
           onClick={() => { setFullscreenImg(null); setImgOffset({ x: 0, y: 0 }); }}
@@ -458,6 +829,10 @@ export const MindNode = memo(MindNodeComponent, (prev, next) => {
     pd.isRoot === nd.isRoot &&
     pd.isDropTarget === nd.isDropTarget &&
     pd.side === nd.side &&
-    pd.collapsed === nd.collapsed
+    pd.collapsed === nd.collapsed &&
+    pd.bgColor === nd.bgColor &&
+    pd.borderColor === nd.borderColor &&
+    pd.isDrillRoot === nd.isDrillRoot &&
+    pd.decorations === nd.decorations
   );
 });

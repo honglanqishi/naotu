@@ -1,0 +1,1 @@
+邮件发送：集成了 nodemailer。目前由于未配置具体的 SMTP，需要启用真实邮件发送，请在 .env 中配置 SMTP_HOST, SMTP_USER, SMTP_PASS 等变量。

@@ -24,7 +24,7 @@ import '@xyflow/react/dist/style.css';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { MindNode } from '@/components/editor/nodes/MindNode';
+import { MindNode, type NodeDecoration, type MindNodeData } from '@/components/editor/nodes/MindNode';
 import { HierarchyEdge } from '@/components/editor/edges/HierarchyEdge';
 import { AssociationEdge } from '@/components/editor/edges/AssociationEdge';
 import { ContextMenu, type ContextMenuAction } from '@/components/editor/ContextMenu';
@@ -59,6 +59,12 @@ interface ContextMenuState {
     y: number;
     /** undefined = 空白画布右键; 否则为节点 ID */
     nodeId?: string;
+}
+
+/** 装饰编辑弹窗状态 */
+interface DecorationEditState {
+    nodeId: string;
+    type: keyof NodeDecoration;
 }
 
 // ─── 全局唯一 ID 生成器（UUIDv4，彻底避免多端/快速操作导致的 ID 碰撞） ────────
@@ -133,6 +139,10 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     /** clipboard 的 ref 版本，供 keydown handler 读取（避免 stale closure + updater 内 preventDefault 问题） */
     const clipboardRef = useRef<Node[]>([]);
     clipboardRef.current = clipboard;
+    /** 下钻导航栈（存储下钻路径上的节点 ID） */
+    const [drillStack, setDrillStack] = useState<string[]>([]);
+    /** 装饰编辑弹窗状态 */
+    const [decoEdit, setDecoEdit] = useState<DecorationEditState | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const dropTargetRef = useRef<string | null>(null);
     // 追踪节点是否正在被拖拽，拖拽期间禁止 dimensions 触发 reLayout
@@ -150,7 +160,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     // ─── Undo / Redo 历史栈（不用 state，避免无效渲染） ──────────────────────
     type Snapshot = { nodes: Node[]; edges: Edge[] };
     const historyRef = useRef<Snapshot[]>([]);
-    const futureRef  = useRef<Snapshot[]>([]);
+    const futureRef = useRef<Snapshot[]>([]);
 
     /** 在执行任意变更操作前调用，把当前状态存入历史（浅拷贝数组，防止引用共享导致快照被后续操作静默污染） */
     const pushHistory = useCallback(() => {
@@ -442,7 +452,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         const container = containerRef.current;
         container?.addEventListener('keydown', handleKeyDown);
         return () => container?.removeEventListener('keydown', handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reLayout, setNodes, setEdges, undo, redo, pushHistory, setClipboard]); // 不依赖 nodes/edges，通过 ref 读取最新值
 
     // 组件卸载时清理 layout 防抖定时器，防止在已卸载组件上调用 setNodes 触发 React 警告
@@ -514,6 +524,99 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     }, []);
 
     const onPaneClick = useCallback(() => setContextMenu(null), []);
+
+    // ─── 下钻逻辑 ────────────────────────────────────────────────────────────
+    const drillDown = useCallback(
+        (nodeId: string) => {
+            setDrillStack((stack) => [...stack, nodeId]);
+            // 标记下钻根节点
+            setNodes((nds) =>
+                nds.map((n) => ({
+                    ...n,
+                    data: { ...n.data, isDrillRoot: n.id === nodeId ? true : undefined },
+                })),
+            );
+            setTimeout(() => fitView({ padding: 0.4, duration: 400 }), 100);
+        },
+        [setNodes, fitView],
+    );
+
+    const drillUp = useCallback(() => {
+        setDrillStack((stack) => {
+            const newStack = stack.slice(0, -1);
+            const parentDrillId = newStack.length > 0 ? newStack[newStack.length - 1] : null;
+            // 更新 isDrillRoot 标记
+            setNodes((nds) =>
+                nds.map((n) => ({
+                    ...n,
+                    data: {
+                        ...n.data,
+                        isDrillRoot: parentDrillId && n.id === parentDrillId ? true : undefined,
+                    },
+                })),
+            );
+            setTimeout(() => fitView({ padding: 0.4, duration: 400 }), 100);
+            return newStack;
+        });
+    }, [setNodes, fitView]);
+
+    // 监听 MindNode 的自定义事件
+    useEffect(() => {
+        const handleDrillUp = () => drillUp();
+        const handleEditDecoration = (e: Event) => {
+            const detail = (e as CustomEvent).detail as { nodeId: string; decorationType: keyof NodeDecoration };
+            setDecoEdit({ nodeId: detail.nodeId, type: detail.decorationType });
+        };
+        window.addEventListener('mindmap-drill-up', handleDrillUp);
+        window.addEventListener('mindmap-edit-decoration', handleEditDecoration);
+        return () => {
+            window.removeEventListener('mindmap-drill-up', handleDrillUp);
+            window.removeEventListener('mindmap-edit-decoration', handleEditDecoration);
+        };
+    }, [drillUp]);
+
+    // ─── 装饰操作辅助函数 ─────────────────────────────────────────────────────
+    const updateDecoration = useCallback(
+        (nodeId: string, key: keyof NodeDecoration, value: unknown) => {
+            pushHistory();
+            setNodes((nds) =>
+                nds.map((n) => {
+                    if (n.id !== nodeId) return n;
+                    const prev = (n.data?.decorations ?? {}) as NodeDecoration;
+                    return {
+                        ...n,
+                        data: {
+                            ...n.data,
+                            decorations: { ...prev, [key]: value },
+                        },
+                    };
+                }),
+            );
+        },
+        [setNodes, pushHistory],
+    );
+
+    const removeDecoration = useCallback(
+        (nodeId: string, key: keyof NodeDecoration) => {
+            pushHistory();
+            setNodes((nds) =>
+                nds.map((n) => {
+                    if (n.id !== nodeId) return n;
+                    const prev = { ...((n.data?.decorations ?? {}) as NodeDecoration) };
+                    delete prev[key];
+                    const hasAny = Object.keys(prev).length > 0;
+                    return {
+                        ...n,
+                        data: {
+                            ...n.data,
+                            decorations: hasAny ? prev : undefined,
+                        },
+                    };
+                }),
+            );
+        },
+        [setNodes, pushHistory],
+    );
 
     // 构建右键菜单 actions
     const buildContextMenuActions = useCallback((): ContextMenuAction[] => {
@@ -612,9 +715,116 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 dividerAfter: true,
             };
 
+            // ── "添加" 子菜单（节点装饰） ───────────────────────────────
+            const addDecorationSubmenu: ContextMenuAction = {
+                label: '添加',
+                icon: <PlusCircleIcon />,
+                children: [
+                    {
+                        label: '评论',
+                        icon: <span style={{ fontSize: 13 }}>💬</span>,
+                        onClick: () => {
+                            const node = nodes.find(n => n.id === targetNodeId);
+                            const current = (node?.data as MindNodeData | undefined)?.decorations?.comment;
+                            if (!current || current.length === 0) {
+                                updateDecoration(targetNodeId, 'comment', []);
+                            }
+                            setTimeout(() => window.dispatchEvent(new CustomEvent('mindmap-edit-decoration', { detail: { nodeId: targetNodeId, decorationType: 'comment' } })), 50);
+                        },
+                    },
+                    {
+                        label: '注释',
+                        icon: <span style={{ fontSize: 13 }}>📝</span>,
+                        onClick: () => {
+                            const node = nodes.find(n => n.id === targetNodeId);
+                            const current = (node?.data as MindNodeData | undefined)?.decorations?.note;
+                            if (current === undefined || current === null) {
+                                updateDecoration(targetNodeId, 'note', '');
+                            }
+                            setTimeout(() => window.dispatchEvent(new CustomEvent('mindmap-edit-decoration', { detail: { nodeId: targetNodeId, decorationType: 'note' } })), 50);
+                        },
+                    },
+                    {
+                        label: '图标',
+                        icon: <span style={{ fontSize: 13 }}>🎯</span>,
+                        onClick: () => {
+                            const icons = ['⭐', '❤️', '🔥', '✅', '⚠️', '❌', '💡', '🎯', '🚀', '📌'];
+                            const pick = window.prompt(`选择图标（输入序号 1-${icons.length}）：\n${icons.map((ic, i) => `${i + 1}. ${ic}`).join('  ')}`);
+                            if (pick) {
+                                const idx = parseInt(pick) - 1;
+                                if (idx >= 0 && idx < icons.length) updateDecoration(targetNodeId, 'icon', icons[idx]);
+                            }
+                        },
+                    },
+                    {
+                        label: '标签',
+                        icon: <span style={{ fontSize: 13 }}>🏷️</span>,
+                        onClick: () => {
+                            const node = nodes.find(n => n.id === targetNodeId);
+                            const current = (node?.data as MindNodeData | undefined)?.decorations?.tags;
+                            if (!current || current.length === 0) {
+                                updateDecoration(targetNodeId, 'tags', []);
+                            }
+                            setTimeout(() => window.dispatchEvent(new CustomEvent('mindmap-edit-decoration', { detail: { nodeId: targetNodeId, decorationType: 'tags' } })), 50);
+                        },
+                    },
+                    {
+                        label: '添加任务',
+                        icon: <span style={{ fontSize: 13 }}>📋</span>,
+                        onClick: () => {
+                            const title = window.prompt('输入任务标题：');
+                            if (title) updateDecoration(targetNodeId, 'task', { title, status: 'todo' });
+                        },
+                    },
+                    {
+                        label: '待办',
+                        icon: <span style={{ fontSize: 13 }}>☑️</span>,
+                        onClick: () => {
+                            updateDecoration(targetNodeId, 'todo', { checked: false });
+                        },
+                    },
+                    {
+                        label: '超链接',
+                        icon: <span style={{ fontSize: 13 }}>🔗</span>,
+                        onClick: () => {
+                            const url = window.prompt('输入链接地址：');
+                            if (url) {
+                                const label = window.prompt('输入链接文字（可选）：') || undefined;
+                                updateDecoration(targetNodeId, 'hyperlink', { url, label });
+                            }
+                        },
+                    },
+                    {
+                        label: '节点高亮',
+                        icon: <span style={{ fontSize: 13 }}>✨</span>,
+                        children: [
+                            { label: '🔴 红色', onClick: () => updateDecoration(targetNodeId, 'highlight', '#ef4444') },
+                            { label: '🟠 橙色', onClick: () => updateDecoration(targetNodeId, 'highlight', '#f97316') },
+                            { label: '🟡 黄色', onClick: () => updateDecoration(targetNodeId, 'highlight', '#eab308') },
+                            { label: '🟢 绿色', onClick: () => updateDecoration(targetNodeId, 'highlight', '#22c55e') },
+                            { label: '🔵 蓝色', onClick: () => updateDecoration(targetNodeId, 'highlight', '#3b82f6') },
+                            { label: '🟣 紫色', onClick: () => updateDecoration(targetNodeId, 'highlight', '#a855f7') },
+                            { label: '❌ 清除高亮', danger: true, onClick: () => removeDecoration(targetNodeId, 'highlight') },
+                        ],
+                    },
+                ],
+                dividerAfter: true,
+            };
+
+            // ── 下钻（始终显示，即使没有子节点） ──────────────────────────────────
+            const drillDownAction: ContextMenuAction = {
+                label: '下钻',
+                icon: <DrillDownIcon />,
+                onClick: () => drillDown(targetNodeId),
+                dividerAfter: true,
+            };
+
             // 根节点不显示删除选项
             if (isRoot) {
-                return [nodeUndoAction, nodeRedoAction, addChildAction, copyAction, pasteNodeAction, newNodeAction];
+                const actions = [nodeUndoAction, nodeRedoAction, addChildAction, addDecorationSubmenu];
+                actions.push(drillDownAction);
+                actions.push(copyAction, pasteNodeAction, newNodeAction);
+                return actions;
             }
 
             // 检测是否处于多选批量删除模式：右键点击的节点已被选中，且有其他节点也被选中
@@ -640,7 +850,10 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                         setNodes(reLayout(nextNodes, nextEdges));
                     },
                 };
-                return [nodeUndoAction, nodeRedoAction, addChildAction, copyAction, pasteNodeAction, newNodeAction, batchDeleteAction];
+                const actions = [nodeUndoAction, nodeRedoAction, addChildAction, addDecorationSubmenu];
+                actions.push(drillDownAction);
+                actions.push(copyAction, pasteNodeAction, newNodeAction, batchDeleteAction);
+                return actions;
             }
 
             const deleteAction: ContextMenuAction = {
@@ -649,18 +862,19 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 danger: true,
                 onClick: () => {
                     pushHistory();
-                    // 递归收集所有子孙节点 ID
                     const descendants = collectDescendants(targetNodeId, edges);
                     const toDelete = new Set([targetNodeId, ...descendants]);
                     const nextNodes = nodes.filter((n) => !toDelete.has(n.id));
                     const nextEdges = edges.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target));
                     setEdges(nextEdges);
-                    // 删除后重新布局，确保兄弟节点位置正确对齐
                     setNodes(reLayout(nextNodes, nextEdges));
                 },
             };
 
-            return [nodeUndoAction, nodeRedoAction, addChildAction, copyAction, pasteNodeAction, newNodeAction, deleteAction];
+            const actions = [nodeUndoAction, nodeRedoAction, addChildAction, addDecorationSubmenu];
+            actions.push(drillDownAction);
+            actions.push(copyAction, pasteNodeAction, newNodeAction, deleteAction);
+            return actions;
         }
 
         // ── 右键点击空白区域 ──────────────────────────────────────────────
@@ -736,40 +950,72 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         }
 
         return [undoAction, redoAction, newNodeAction, pasteAtPosAction];
-    }, [contextMenu, nodes, edges, clipboard, setNodes, setEdges, setClipboard, createNode, reLayout, screenToFlowPosition, pushHistory, undo, redo]);
+    }, [contextMenu, nodes, edges, clipboard, setNodes, setEdges, setClipboard, createNode, reLayout, screenToFlowPosition, pushHistory, undo, redo, updateDecoration, removeDecoration, drillDown]);
 
     // ─── 折叠：计算需要隐藏的节点/边（不修改 nodes 状态,仅影响渲染） ──────────
-    // 无折叠节点时返回稳定空集合（EMPTY_ID_SET），避免 displayNodes memo 因新 Set 引用而失效
     const hiddenNodeIds = useMemo(() => {
         const hasCollapsed = nodes.some((n) => n.data?.collapsed);
         if (!hasCollapsed) return EMPTY_ID_SET;
         return getHiddenNodeIds(nodes, edges);
     }, [nodes, edges]);
 
-    // 优化：无折叠节点时直接使用原 nodes 数组（避免 map 创建全新对象）
+    // ─── 下钻：计算可见的节点 ID 集合 ────────────────────────────────────
+    const drillVisibleIds = useMemo(() => {
+        if (drillStack.length === 0) return null; // null = 不过滤
+        const drillRootId = drillStack[drillStack.length - 1];
+        const descendants = collectDescendants(drillRootId, edges);
+        return new Set([drillRootId, ...descendants]);
+    }, [drillStack, edges]);
+
     const displayNodes = useMemo(
         () => {
-            if (hiddenNodeIds.size === 0) return nodes;
-            // 有折叠时，只为隐藏状态变化的节点创建新对象
-            return nodes.map((n) => {
-                const shouldHide = hiddenNodeIds.has(n.id);
-                if (!!n.hidden === shouldHide) return n; // 引用不变
-                return { ...n, hidden: shouldHide };
-            });
+            let result = nodes;
+
+            // 下钻过滤
+            if (drillVisibleIds) {
+                result = result.map((n) => {
+                    const shouldShow = drillVisibleIds.has(n.id);
+                    if (shouldShow === !n.hidden) return n;
+                    return { ...n, hidden: !shouldShow };
+                });
+            }
+
+            // 折叠隐藏
+            if (hiddenNodeIds.size > 0) {
+                result = result.map((n) => {
+                    const shouldHide = hiddenNodeIds.has(n.id) || (drillVisibleIds ? !drillVisibleIds.has(n.id) : false);
+                    if (!!n.hidden === shouldHide) return n;
+                    return { ...n, hidden: shouldHide };
+                });
+            }
+
+            return result;
         },
-        [nodes, hiddenNodeIds],
+        [nodes, hiddenNodeIds, drillVisibleIds],
     );
 
     const displayEdges = useMemo(
         () => {
-            if (hiddenNodeIds.size === 0) return edges;
+            const hiddenSet = new Set<string>();
+            // 合并折叠隐藏和下钻不可见
+            hiddenNodeIds.forEach((id) => hiddenSet.add(id));
+            if (drillVisibleIds) {
+                edges.forEach((e) => {
+                    if (!drillVisibleIds.has(e.source) || !drillVisibleIds.has(e.target)) {
+                        hiddenSet.add(e.source);
+                        hiddenSet.add(e.target);
+                    }
+                });
+            }
+            if (hiddenSet.size === 0 && !drillVisibleIds) return edges;
             return edges.map((e) => {
-                const shouldHide = hiddenNodeIds.has(e.source) || hiddenNodeIds.has(e.target);
+                const shouldHide = hiddenSet.has(e.source) || hiddenSet.has(e.target)
+                    || (drillVisibleIds ? (!drillVisibleIds.has(e.source) || !drillVisibleIds.has(e.target)) : false);
                 if (!!e.hidden === shouldHide) return e;
                 return { ...e, hidden: shouldHide };
             });
         },
-        [edges, hiddenNodeIds],
+        [edges, hiddenNodeIds, drillVisibleIds],
     );
 
     if (isLoading) {
@@ -816,6 +1062,28 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                     >
                         {nodes.length} 个主题
                     </span>
+                    {/* 下钻面包屑 */}
+                    {drillStack.length > 0 && (
+                        <>
+                            <span style={{ color: 'var(--border)' }}>|</span>
+                            <button
+                                onClick={drillUp}
+                                className="flex items-center gap-1 text-xs transition-colors"
+                                style={{
+                                    color: 'var(--primary)',
+                                    background: 'rgba(99,102,241,0.1)',
+                                    padding: '2px 8px',
+                                    borderRadius: 6,
+                                    border: '1px solid rgba(99,102,241,0.2)',
+                                }}
+                            >
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <path d="M19 12H5M12 19l-7-7 7-7" />
+                                </svg>
+                                退出下钻（层级 {drillStack.length}）
+                            </button>
+                        </>
+                    )}
                 </div>
                 <div className="flex items-center gap-2">
                     {isSaving && (
@@ -824,10 +1092,10 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                         </span>
                     )}
                 </div>
-            </header>
+            </header >
 
             {/* ReactFlow 画布 */}
-            <div
+            < div
                 className="flex-1"
                 onContextMenu={onContextMenu}
                 onDoubleClick={onCanvasDoubleClick}
@@ -838,7 +1106,8 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                     if (!target.isContentEditable && target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
                         containerRef.current?.focus();
                     }
-                }}
+                }
+                }
             >
                 <ReactFlow
                     nodes={displayNodes}
@@ -874,18 +1143,20 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                         nodeColor="var(--primary)"
                     />
                 </ReactFlow>
-            </div>
+            </div >
 
             {/* 右键自定义菜单 */}
-            {contextMenu && (
-                <ContextMenu
-                    x={contextMenu.x}
-                    y={contextMenu.y}
-                    actions={buildContextMenuActions()}
-                    onClose={() => setContextMenu(null)}
-                />
-            )}
-        </div>
+            {
+                contextMenu && (
+                    <ContextMenu
+                        x={contextMenu.x}
+                        y={contextMenu.y}
+                        actions={buildContextMenuActions()}
+                        onClose={() => setContextMenu(null)}
+                    />
+                )
+            }
+        </div >
     );
 }
 
@@ -942,6 +1213,21 @@ function RedoIcon() {
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M21 7v6h-6" />
             <path d="M21 13C19.4 8.9 15.1 6 10 6c-4.4 0-8.3 2.4-10 6" />
+        </svg>
+    );
+}
+function PlusCircleIcon() {
+    return (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 8v8M8 12h8" />
+        </svg>
+    );
+}
+function DrillDownIcon() {
+    return (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 5v14M5 12l7 7 7-7" />
         </svg>
     );
 }

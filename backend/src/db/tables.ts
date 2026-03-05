@@ -19,22 +19,27 @@ let _mindmaps: any;
 let _tags: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _mindmapsTags: any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _todoReminders: any;
 
 if (isProduction) {
     const schema = await import('./schema.js');
     _mindmaps = schema.mindmaps;
     _tags = schema.tags;
     _mindmapsTags = schema.mindmapsTags;
+    _todoReminders = (schema as any).todoReminders;
 } else {
     const schema = await import('./schema.sqlite.js');
     _mindmaps = schema.mindmaps;
     _tags = schema.tags;
     _mindmapsTags = schema.mindmapsTags;
+    _todoReminders = (schema as any).todoReminders;
 }
 
 export const mindmaps = _mindmaps;
 export const tags = _tags;
 export const mindmapsTags = _mindmapsTags;
+export const todoReminders = _todoReminders;
 
 /**
  * 生成 UUID

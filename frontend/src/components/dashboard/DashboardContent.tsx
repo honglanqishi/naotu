@@ -22,13 +22,14 @@ interface MindMap {
 export function DashboardContent() {
     const router = useRouter();
     const queryClient = useQueryClient();
-    const { data: session } = useSession();
+    const { data: session, isPending, error } = useSession();
     const [isCreating, setIsCreating] = useState(false);
     const [newTitle, setNewTitle] = useState('');
 
     // 将 better-auth session 同步到 Zustand store，
     // 使其他组件可以通过 useAuthStore() 直接访问用户信息
     const { setUser, reset } = useAuthStore();
+
     useEffect(() => {
         if (session?.user) {
             setUser({
@@ -37,11 +38,22 @@ export function DashboardContent() {
                 email: session.user.email,
                 image: session.user.image,
             });
-        } else if (session === null) {
-            // session 明确为 null（已加载但未登录）时清除 store
-            reset();
         }
-    }, [session, setUser, reset]);
+    }, [session, setUser]);
+
+    // 处理无权限或网络错误引发的会话失效，直接重定向
+    useEffect(() => {
+        if (!isPending) {
+            if (error) {
+                toast.error('网络错误或无权访问，请重新登录');
+                reset();
+                router.push('/login');
+            } else if (session === null) {
+                reset();
+                router.push('/login');
+            }
+        }
+    }, [session, isPending, error, router, reset]);
 
     // 获取导图列表
     const { data, isLoading } = useQuery({
@@ -138,15 +150,15 @@ export function DashboardContent() {
                                 />
                             )}
                             <button
-                                    onClick={handleSignOut}
-                                    className="text-sm px-3 py-1.5 rounded-lg transition-colors"
-                                    style={{
-                                        color: 'var(--foreground-muted)',
-                                        border: '1px solid var(--border)',
-                                    }}
-                                >
-                                    退出
-                                </button>
+                                onClick={handleSignOut}
+                                className="text-sm px-3 py-1.5 rounded-lg transition-colors"
+                                style={{
+                                    color: 'var(--foreground-muted)',
+                                    border: '1px solid var(--border)',
+                                }}
+                            >
+                                退出
+                            </button>
                         </div>
                     )}
                 </div>
@@ -368,7 +380,7 @@ function MapCard({
                 </div>
             </div>
 
-       
+
 
             {/* 菜单按钮（hover 显示） */}
             <button

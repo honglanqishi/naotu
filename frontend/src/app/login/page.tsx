@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import { LoginForm } from '@/components/auth/LoginForm';
 
 export const metadata: Metadata = {
@@ -103,7 +104,9 @@ export default function LoginPage() {
                 <img alt="" className="absolute block w-full h-full max-w-none" style={{ objectFit: 'fill' }} src="/images/node-2-9240.svg" />
             </div>
 
-            <LoginForm />
+            <Suspense fallback={<div className="text-white">Loading...</div>}>
+                <LoginForm />
+            </Suspense>
         </main>
     );
 }

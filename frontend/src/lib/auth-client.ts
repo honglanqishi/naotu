@@ -12,6 +12,21 @@ import { createAuthClient } from 'better-auth/react';
 export const authClient = createAuthClient({
     baseURL: process.env.NEXT_PUBLIC_API_URL || '',
     basePath: '/auth',
+    fetchOptions: {
+        // 当 better-auth fetch 遇到错误时，统一处理 401
+        onError: (context) => {
+            if (context.response?.status === 401) {
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+                }
+            } else if (context.response?.status === 500 || context.response?.status === 502 || context.response?.status === 504) {
+                // 后端服务不可用或是 Next.js proxy 报错 (ECONNREFUSED)
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('auth:network_error'));
+                }
+            }
+        },
+    },
 });
 
 export const {

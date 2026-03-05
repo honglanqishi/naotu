@@ -9,8 +9,14 @@ import { secureHeaders } from 'hono/secure-headers';
 import { authRoutes } from './routes/auth.js';
 import { mapsRoutes } from './routes/maps.js';
 import { tagsRoutes } from './routes/tags.js';
+import { startReminderWorker } from './workers/reminder.worker.js';
 
 const app = new Hono();
+
+// =============================================
+// 启动后台工作者
+// =============================================
+startReminderWorker();
 
 // =============================================
 // 全局中间件

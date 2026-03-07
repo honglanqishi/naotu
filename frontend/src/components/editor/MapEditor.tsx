@@ -787,11 +787,20 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                         label: '超链接',
                         icon: <span style={{ fontSize: 13 }}>🔗</span>,
                         onClick: () => {
-                            const url = window.prompt('输入链接地址：');
-                            if (url) {
-                                const label = window.prompt('输入链接文字（可选）：') || undefined;
-                                updateDecoration(targetNodeId, 'hyperlink', { url, label });
+                            const node = nodes.find((n) => n.id === targetNodeId);
+                            const current = (node?.data as MindNodeData | undefined)?.decorations?.hyperlink;
+                            if (!current) {
+                                updateDecoration(targetNodeId, 'hyperlink', { url: '' });
                             }
+                            setTimeout(
+                                () =>
+                                    window.dispatchEvent(
+                                        new CustomEvent('mindmap-edit-decoration', {
+                                            detail: { nodeId: targetNodeId, decorationType: 'hyperlink' },
+                                        }),
+                                    ),
+                                50,
+                            );
                         },
                     },
                     {

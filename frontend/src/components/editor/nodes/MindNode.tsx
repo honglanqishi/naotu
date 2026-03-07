@@ -2,10 +2,11 @@
 
 import { memo, useCallback, useRef, useState, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Handle, Position, NodeToolbar, useReactFlow, useEdges, type NodeProps } from '@xyflow/react';
+import { Handle, Position, NodeToolbar, useReactFlow, useEdges, useStore, type NodeProps } from '@xyflow/react';
 import { RichTextToolbar } from '@/components/editor/RichTextToolbar';
 import { useSession } from '@/lib/auth-client';
 import { CommentPopover } from '../decorations/CommentPopover';
+import { HyperlinkBadge } from '../decorations/HyperlinkBadge';
 import { NotePopover } from '../decorations/NotePopover';
 import { TagPopover } from '../decorations/TagPopover';
 import { TodoCheckbox } from '../decorations/TodoCheckbox';
@@ -89,6 +90,7 @@ const DECORATION_ICONS: { key: keyof NodeDecoration; emoji: string; title: strin
 export function MindNodeComponent({ id, data, selected }: NodeProps) {
   const nodeData = data as MindNodeData;
   const { updateNodeData, getNodes } = useReactFlow();
+  const selectedNodeIds = useStore((state) => state.nodes.filter((n) => n.selected).map((n) => n.id));
   const allEdges = useEdges();
   const [editState, setEditState] = useState<EditState>('normal');
   const editorRef = useRef<HTMLDivElement>(null);
@@ -96,12 +98,17 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
 
   // 控制各气泡的弹出状态
   const [activePopover, setActivePopover] = useState<'comment' | 'note' | 'tags' | null>(null);
+  const [hyperlinkEditToken, setHyperlinkEditToken] = useState(0);
 
   // 监听来自菜单的外部激活事件
   useEffect(() => {
     const handleEditDeco = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail.nodeId === id) {
+        if (detail.decorationType === 'hyperlink') {
+          setHyperlinkEditToken((n) => n + 1);
+          return;
+        }
         setActivePopover(detail.decorationType as 'comment' | 'note' | 'tags');
       }
     };
@@ -308,7 +315,15 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
 
   // ── 装饰数据 ─────────────────────────────────────────────────
   const decorations = nodeData.decorations;
-  const hasDecorations = activePopover !== null || (decorations && Object.keys(decorations).some((k) => {
+  const normalizedTags = useMemo(() => {
+    const raw = decorations?.tags;
+    if (!Array.isArray(raw)) return [] as { text: string; color: string }[];
+    return raw.map((tag) => (typeof tag === 'string' ? { text: tag, color: '#3b82f6' } : tag));
+  }, [decorations?.tags]);
+
+  const hasTags = activePopover === 'tags' || normalizedTags.length > 0;
+  const hasBottomDecorations = activePopover === 'comment' || activePopover === 'note' || (decorations && Object.keys(decorations).some((k) => {
+    if (k === 'tags') return false;
     const val = decorations[k as keyof NodeDecoration];
     if (val === undefined || val === null || val === '') return false;
     if (Array.isArray(val) && val.length === 0) return false;
@@ -319,12 +334,14 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
   const highlightColor = decorations?.highlight;
   const customBorderColor = nodeData.borderColor || highlightColor;
   const customBgColor = nodeData.bgColor;
+  const toolbarOwnerId = selectedNodeIds[0];
+  const showToolbar = editState === 'editing' || (selected && toolbarOwnerId === id);
 
   return (
     <>
       {/* ── 富文本工具栏（NodeToolbar：选中或编辑时显示） ────────── */}
       <NodeToolbar
-        isVisible={!!(selected || editState === 'editing')}
+        isVisible={showToolbar}
         position={Position.Top}
         offset={12}
         align="center"
@@ -432,6 +449,64 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
           </div>
         )}
 
+        {/* 标签区：独立于底部装饰行，放在节点内容前方（利用内边距区域） */}
+        {editState === 'normal' && hasTags && (
+          <TagPopover
+            open={activePopover === 'tags'}
+            onOpenChange={(op) => setActivePopover(op ? 'tags' : null)}
+            trigger={(
+              <div
+                className="nodrag nopan"
+                style={{
+                  alignSelf: 'flex-start',
+                  display: 'flex',
+                  gap: 4,
+                  flexWrap: 'wrap',
+                  marginBottom: 4,
+                  maxWidth: '100%',
+                }}
+              >
+                {normalizedTags.length === 0 && activePopover === 'tags' && (
+                  <span style={{ fontSize: 12, padding: '1px 3px', borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>🏷️</span>
+                )}
+                {normalizedTags.map((tag) => (
+                  <span
+                    key={tag.text}
+                    style={{
+                      backgroundColor: tag.color,
+                      color: 'white',
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      maxWidth: 120,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    className="opacity-90 hover:opacity-100 hover:scale-105 transition-all shadow-sm"
+                  >
+                    {tag.text}
+                  </span>
+                ))}
+              </div>
+            )}
+            nodeTags={normalizedTags.map((tag) => tag.text)}
+            availableTags={availableTags}
+            onAddTag={(text, color) => {
+              const curr = [...normalizedTags];
+              if (!curr.find((tag) => tag.text === text)) {
+                updateNodeData(id, { decorations: { ...decorations, tags: [...curr, { text, color }] } });
+              }
+            }}
+            onRemoveTag={(text) => {
+              const next = normalizedTags.filter((tag) => tag.text !== text);
+              updateNodeData(id, { decorations: { ...decorations, tags: next.length ? next : undefined } });
+              if (!next.length) setActivePopover(null);
+            }}
+          />
+        )}
+
         {/* 富文本编辑区 */}
         <div
           ref={editorRef}
@@ -455,7 +530,7 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
         />
 
         {/* 装饰行（在节点下方或内部） */}
-        {hasDecorations && editState === 'normal' && (
+        {hasBottomDecorations && editState === 'normal' && (
           <div
             className="nodrag nopan"
             style={{
@@ -468,6 +543,8 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
             }}
           >
             {DECORATION_ICONS.map(({ key, emoji, title }) => {
+              if (key === 'tags') return null;
+
               const val = decorations?.[key as keyof NodeDecoration];
               if (activePopover !== key) {
                 if (val === undefined || val === null || val === '') return null;
@@ -477,42 +554,13 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
               // 对不同类型的装饰图标定义触发元素
               let iconElement: React.ReactNode = null;
 
-              if (key === 'tags') {
-                let tagList = (val as any[]) || [];
-                // 兼容旧的 string[] 数据
-                if (tagList.length > 0 && typeof tagList[0] === 'string') {
-                  tagList = tagList.map(t => ({ text: t, color: '#3b82f6' }));
-                }
-
-                iconElement = (
-                  <div className="flex gap-1 items-center min-h-[16px]" onClick={(e) => { e.stopPropagation(); setActivePopover('tags'); }}>
-                    {tagList.length === 0 && activePopover === 'tags' && (
-                      <span style={{ fontSize: 12, padding: '1px 3px', borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>🏷️</span>
-                    )}
-                    {tagList.map(t => (
-                      <span
-                        key={t.text}
-                        style={{
-                          backgroundColor: t.color,
-                          color: 'white',
-                          padding: '1px 6px',
-                          borderRadius: '4px',
-                          fontSize: '11px',
-                          cursor: 'pointer',
-                        }}
-                        className="opacity-90 hover:opacity-100 hover:scale-105 transition-all shadow-sm"
-                      >
-                        {t.text}
-                      </span>
-                    ))}
-                  </div>
-                );
-              } else if (key === 'todo') {
+              if (key === 'todo') {
                 const todoData = (val as { checked: boolean; reminder?: any }) || { checked: false };
                 iconElement = (
                   <TodoCheckbox
                     checked={!!todoData.checked}
                     reminder={todoData.reminder}
+                    compact
                     onToggle={() => {
                       updateNodeData(id, { decorations: { ...decorations, todo: { ...todoData, checked: !todoData.checked } } });
                     }}
@@ -527,6 +575,23 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
                     onRemoveReminder={() => {
                       const { reminder: _r, ...rest } = todoData;
                       updateNodeData(id, { decorations: { ...decorations, todo: rest } });
+                    }}
+                  />
+                );
+              } else if (key === 'hyperlink') {
+                const hyperlinkData = (val as { url: string; label?: string; mapId?: string }) || { url: '' };
+                iconElement = (
+                  <HyperlinkBadge
+                    hyperlink={hyperlinkData}
+                    requestEditToken={hyperlinkEditToken}
+                    compact
+                    onSave={(next) => {
+                      updateNodeData(id, { decorations: { ...decorations, hyperlink: next } });
+                    }}
+                    onRemove={() => {
+                      const next = { ...decorations };
+                      delete next.hyperlink;
+                      updateNodeData(id, { decorations: next });
                     }}
                   />
                 );
@@ -553,14 +618,16 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
                     style={{
                       fontSize: 12,
                       cursor: 'pointer',
-                      padding: '2px 4px',
+                      width: 22,
+                      height: 22,
                       borderRadius: 4,
                       background: 'rgba(255,255,255,0.08)',
                       transition: 'background 0.12s',
                       lineHeight: 1,
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 2,
+                      justifyContent: 'center',
+                      position: 'relative',
                     }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.2)'; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.08)'; }}
@@ -578,7 +645,26 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
                     }}
                   >
                     {emoji}
-                    {key === 'comment' && comments.length > 0 && <span className="text-[10px] text-white/80">{comments.length}</span>}
+                    {key === 'comment' && comments.length > 0 && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: -4,
+                          right: -4,
+                          minWidth: 12,
+                          height: 12,
+                          borderRadius: 999,
+                          background: 'var(--primary)',
+                          color: '#fff',
+                          fontSize: 9,
+                          lineHeight: '12px',
+                          textAlign: 'center',
+                          padding: '0 2px',
+                        }}
+                      >
+                        {comments.length > 9 ? '9+' : comments.length}
+                      </span>
+                    )}
 
                     {/* CUSTOM TOOLTIP CONTENT */}
                     {key === 'comment' && comments.length > 0 && (
@@ -612,7 +698,18 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
               }
 
               return (
-                <div key={key} className="relative">
+                <div
+                  key={key}
+                  className="relative"
+                  style={{
+                    width: 22,
+                    height: 22,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
                   {/* 根据类型包裹对应的 Popover */}
                   {key === 'comment' ? (
                     <CommentPopover
@@ -655,32 +752,6 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
                       note={decorations!.note || ''}
                       onSave={(html) => {
                         updateNodeData(id, { decorations: { ...decorations, note: sanitizeHtml(html) } });
-                      }}
-                    />
-                  ) : key === 'tags' ? (
-                    <TagPopover
-                      open={activePopover === 'tags'}
-                      onOpenChange={(op) => setActivePopover(op ? 'tags' : null)}
-                      trigger={iconElement}
-                      nodeTags={(decorations!.tags || []).map((t: any) => typeof t === 'string' ? t : t.text)}
-                      availableTags={availableTags}
-                      onAddTag={(text, color) => {
-                        let curr: { text: string, color: string }[] = [];
-                        if (Array.isArray(decorations!.tags)) {
-                          curr = decorations!.tags.map(t => typeof t === 'string' ? { text: t, color: '#3b82f6' } : t);
-                        }
-                        if (!curr.find(t => t.text === text)) {
-                          updateNodeData(id, { decorations: { ...decorations, tags: [...curr, { text, color }] } });
-                        }
-                      }}
-                      onRemoveTag={(text) => {
-                        let curr: { text: string, color: string }[] = [];
-                        if (Array.isArray(decorations!.tags)) {
-                          curr = decorations!.tags.map(t => typeof t === 'string' ? { text: t, color: '#3b82f6' } : t);
-                        }
-                        const next = curr.filter(t => t.text !== text);
-                        updateNodeData(id, { decorations: { ...decorations, tags: next.length ? next : undefined } });
-                        if (!next.length) setActivePopover(null);
                       }}
                     />
                   ) : iconElement}

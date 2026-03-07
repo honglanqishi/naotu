@@ -38,6 +38,7 @@ function getRemindLabel(value: string) {
 interface TodoCheckboxProps {
     checked: boolean;
     reminder?: TodoReminder;
+    compact?: boolean;
     onToggle: () => void;
     onRemove: () => void;
     onSetReminder: (reminder: TodoReminder) => void;
@@ -53,6 +54,7 @@ function getToday() {
 export function TodoCheckbox({
     checked,
     reminder,
+    compact = false,
     onToggle,
     onRemove,
     onSetReminder,
@@ -148,15 +150,19 @@ export function TodoCheckbox({
                 onClick={(e) => { e.stopPropagation(); onToggle(); }}
                 onContextMenu={handleContextMenu}
                 style={{
+                    position: 'relative',
                     cursor: 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 4,
-                    padding: '2px 4px',
+                    justifyContent: 'center',
+                    width: compact ? 22 : undefined,
+                    height: compact ? 22 : undefined,
+                    gap: compact ? 0 : 4,
+                    padding: compact ? 0 : '2px 4px',
                     borderRadius: 4,
                     background: 'rgba(255,255,255,0.08)',
                     transition: 'background 0.12s',
-                    fontSize: 14,
+                    fontSize: compact ? 12 : 14,
                     lineHeight: 1,
                 }}
                 onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.2)'; }}
@@ -164,19 +170,34 @@ export function TodoCheckbox({
                 title={reminder ? `提醒: ${getRemindLabel(remind)}\n邮箱: ${reminder.email}` : '待办 (右键设置提醒)'}
             >
                 {checked ? (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <svg width={compact ? '14' : '16'} height={compact ? '14' : '16'} viewBox="0 0 24 24" fill="none">
                         <rect x="3" y="3" width="18" height="18" rx="3" fill="#22c55e" />
                         <polyline points="7 12 10 15 17 8" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                 ) : (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <svg width={compact ? '14' : '16'} height={compact ? '14' : '16'} viewBox="0 0 24 24" fill="none">
                         <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="2" fill="rgba(255,255,255,0.1)" />
                     </svg>
                 )}
                 {reminder && (
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5" style={{ marginLeft: -2 }}>
-                        <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" />
-                    </svg>
+                    compact ? (
+                        <span
+                            style={{
+                                position: 'absolute',
+                                top: 2,
+                                right: 2,
+                                width: 5,
+                                height: 5,
+                                borderRadius: '50%',
+                                background: '#f59e0b',
+                                boxShadow: '0 0 0 1px rgba(0,0,0,0.35)',
+                            }}
+                        />
+                    ) : (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5" style={{ marginLeft: -2 }}>
+                            <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" />
+                        </svg>
+                    )
                 )}
             </span>
 

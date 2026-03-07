@@ -32,7 +32,7 @@ export function CommentPopover({
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editText, setEditText] = useState('');
 
-    const handleSend = () => {
+    const handleSaveComment = () => {
         if (!text.trim()) return;
         onAdd(text.trim());
         setText('');
@@ -99,23 +99,25 @@ export function CommentPopover({
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && e.ctrlKey) {
                                     e.preventDefault();
-                                    handleSend();
+                                    handleSaveComment();
                                 }
                             }}
                         />
                         <div className="flex flex-col items-center justify-between bg-gray-50 rounded-md p-1 border border-gray-100 w-[60px]">
                             <button
-                                onClick={handleSend}
+                                onClick={handleSaveComment}
                                 disabled={!text.trim()}
                                 className="w-full bg-primary text-white text-xs py-1.5 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
                             >
-                                发送
+                                保存
                             </button>
                             <span className="text-[10px] text-gray-400 font-mono tracking-tighter">
                                 {text.length}/300
                             </span>
                         </div>
                     </div>
+
+                    <div className="-mt-2 text-[11px] text-gray-400">点击“保存”或按 Ctrl+Enter 保存评论</div>
 
                     {/* Comments List */}
                     {comments.length > 0 && (
@@ -140,7 +142,7 @@ export function CommentPopover({
                                             />
                                             <div className="flex gap-2 justify-end">
                                                 <button onClick={() => setEditingId(null)} className="text-xs text-gray-500 hover:text-gray-700">取消</button>
-                                                <button onClick={() => handleUpdate(comment.id)} className="text-xs text-primary hover:text-primary/80 font-medium">确定</button>
+                                                <button onClick={() => handleUpdate(comment.id)} className="text-xs text-primary hover:text-primary/80 font-medium">保存</button>
                                             </div>
                                         </div>
                                     ) : (

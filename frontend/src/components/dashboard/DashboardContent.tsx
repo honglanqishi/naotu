@@ -1,113 +1,54 @@
 'use client';
 
 /* eslint-disable @next/next/no-img-element */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
-import { useSession } from '@/lib/auth-client';
-import { useAuthStore } from '@/store/authStore';
-import { api } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/utils';
+import { useMindMaps, type MindMap } from '@/hooks/useMindMaps';
+import { useAuthRedirect, getUserInitials } from '@/hooks/useAuthRedirect';
+import { Modal } from '@/components/ui/Modal';
 
 // ── Figma MCP 资源映射 (node 9:2) ──────────────────────────────────
-// 变量名与 Figma 生成的 imgContainerN 一一对应，已下载至 /images/dashboard/
-const imgContainer  = '/images/dashboard/asset-01.svg'; // 悬浮按钮加号
-const imgContainer1 = '/images/dashboard/asset-02.svg'; // 导航 Logo 脑图图标
-const imgIcon       = '/images/dashboard/asset-03.svg'; // 搜索放大镜
-const imgContainer2 = '/images/dashboard/asset-04.svg'; // 铃铛通知
-const imgContainer3 = '/images/dashboard/asset-05.svg'; // 用户栏 chevron
-const imgContainer4 = '/images/dashboard/asset-06.svg'; // 侧栏-全部脑图
-const imgContainer5 = '/images/dashboard/asset-07.svg'; // 侧栏-收藏
-const imgContainer6 = '/images/dashboard/asset-08.svg'; // 侧栏-项目
-const imgContainer7 = '/images/dashboard/asset-09.svg'; // 侧栏-最近
-const imgContainer8 = '/images/dashboard/asset-10.svg'; // 侧栏-回收站
-const imgContainer9 = '/images/dashboard/asset-11.svg'; // 新建按钮加号
-const imgContainer10 = '/images/dashboard/asset-12.svg'; // 卡片1 图标(蓝)
-const imgContainer11 = '/images/dashboard/asset-13.svg'; // 三点菜单
-const imgContainer12 = '/images/dashboard/asset-14.svg'; // 时钟
-const imgContainer13 = '/images/dashboard/asset-15.svg'; // 卡片2 图标(绿)
-const imgContainer14 = '/images/dashboard/asset-16.svg'; // 卡片3 图标(粉)
-const imgContainer15 = '/images/dashboard/asset-17.svg'; // 创建新-加号
-const imgContainer16 = '/images/dashboard/asset-18.svg'; // 卡片4 图标(紫)
+// 已下载至 /images/dashboard/，按语义命名
+const ASSETS = {
+    fabPlus:       '/images/dashboard/asset-01.svg', // 悬浮按钮加号
+    logoIcon:      '/images/dashboard/asset-02.svg', // 导航 Logo 脑图图标
+    searchIcon:    '/images/dashboard/asset-03.svg', // 搜索放大镜
+    bellIcon:      '/images/dashboard/asset-04.svg', // 铃铛通知
+    chevronIcon:   '/images/dashboard/asset-05.svg', // 用户栏 chevron
+    navAll:        '/images/dashboard/asset-06.svg', // 侧栏-全部脑图
+    navFav:        '/images/dashboard/asset-07.svg', // 侧栏-收藏
+    navProject:    '/images/dashboard/asset-08.svg', // 侧栏-项目
+    navRecent:     '/images/dashboard/asset-09.svg', // 侧栏-最近
+    navTrash:      '/images/dashboard/asset-10.svg', // 侧栏-回收站
+    newPlus:       '/images/dashboard/asset-11.svg', // 新建按钮加号
+    card1Icon:     '/images/dashboard/asset-12.svg', // 卡片1 图标(蓝)
+    dotsMenu:      '/images/dashboard/asset-13.svg', // 三点菜单
+    clockIcon:     '/images/dashboard/asset-14.svg', // 时钟
+    card2Icon:     '/images/dashboard/asset-15.svg', // 卡片2 图标(绿)
+    card3Icon:     '/images/dashboard/asset-16.svg', // 卡片3 图标(粉)
+    createPlus:    '/images/dashboard/asset-17.svg', // 创建新-加号
+    card4Icon:     '/images/dashboard/asset-18.svg', // 卡片4 图标(紫)
+} as const;
 
-interface MindMap {
-    id: string;
-    title: string;
-    description?: string;
-    createdAt: string;
-    updatedAt: string;
-}
+// 4种卡片图标主题循环
+const ICON_THEMES = [
+    { bg: 'rgba(59,130,246,0.2)', border: 'rgba(59,130,246,0.3)', src: ASSETS.card1Icon, w: '16.031px', h: '16.031px' },
+    { bg: 'rgba(16,185,129,0.2)', border: 'rgba(16,185,129,0.3)', src: ASSETS.card2Icon, w: '16.034px', h: '18.002px' },
+    { bg: 'rgba(236,72,153,0.2)', border: 'rgba(236,72,153,0.3)', src: ASSETS.card3Icon, w: '19.898px', h: '20.602px' },
+    { bg: 'rgba(168,85,247,0.2)', border: 'rgba(168,85,247,0.3)', src: ASSETS.card4Icon, w: '21.984px', h: '16.652px' },
+] as const;
 
 export function DashboardContent() {
     const router = useRouter();
-    const queryClient = useQueryClient();
-    const { data: session, isPending, error } = useSession();
-    const { setUser, reset } = useAuthStore();
 
-    useEffect(() => {
-        if (session?.user) {
-            setUser({
-                id: session.user.id,
-                name: session.user.name,
-                email: session.user.email,
-                image: session.user.image,
-            });
-        }
-    }, [session, setUser]);
+    // ── 认证守卫（含 Zustand 同步） ──
+    const { session } = useAuthRedirect();
 
-    useEffect(() => {
-        if (!isPending) {
-            if (error) {
-                toast.error('网络错误或无权访问，请重新登录');
-                reset();
-                router.push('/login');
-            } else if (session === null) {
-                reset();
-                router.push('/login');
-            }
-        }
-    }, [session, isPending, error, router, reset]);
+    // ── 数据 Hook ──
+    const { maps, isLoading: isMapsLoading, isError: isMapsError,
+            createMap, isCreating, deleteMap, isDeleting } = useMindMaps();
 
-    const {
-        data: maps = [],
-        isLoading: isMapsLoading,
-        isError: isMapsError,
-    } = useQuery({
-        queryKey: ['maps'],
-        queryFn: async () => {
-            const res = await api.get<{ maps: MindMap[] }>('/api/maps');
-            return res.data.maps;
-        },
-    });
-
-    const createMutation = useMutation({
-        mutationFn: async ({ title, description }: { title: string; description?: string }) => {
-            const res = await api.post<{ map: MindMap }>('/api/maps', { title, description });
-            return res.data.map;
-        },
-        onSuccess: (newMap) => {
-            queryClient.invalidateQueries({ queryKey: ['maps'] });
-            toast.success('脑图创建成功');
-            setDialogOpen(false);
-            setNewTitle('');
-            setNewDesc('');
-            router.push(`/map/${newMap.id}`);
-        },
-        onError: () => toast.error('创建失败，请重试'),
-    });
-
-    const deleteMutation = useMutation({
-        mutationFn: async (id: string) => {
-            await api.delete(`/api/maps/${id}`);
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['maps'] });
-            toast.success('脑图已删除');
-            setDeleteTarget(null);
-        },
-        onError: () => toast.error('删除失败，请重试'),
-    });
 
     // ── 新建脑图弹窗状态 ──
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -133,137 +74,78 @@ export function DashboardContent() {
     };
 
     const handleCreate = () => {
-        if (createMutation.isPending) return;
+        if (isCreating) return;
         const title = newTitle.trim() || `新建脑图 ${new Date().toLocaleString('zh-CN', { hour12: false })}`;
-        createMutation.mutate({ title, description: newDesc.trim() || undefined });
+        createMap(
+            { title, description: newDesc.trim() || undefined },
+            { onSuccess: () => { setDialogOpen(false); setNewTitle(''); setNewDesc(''); } },
+        );
     };
 
     const handleDeleteConfirm = () => {
-        if (!deleteTarget || deleteMutation.isPending) return;
-        deleteMutation.mutate(deleteTarget.id);
+        if (!deleteTarget || isDeleting) return;
+        deleteMap(deleteTarget.id, { onSuccess: () => setDeleteTarget(null) });
     };
 
     const userName = session?.user?.name || session?.user?.email || '访客用户';
+    const userInitials = getUserInitials(session?.user?.name || session?.user?.email);
 
-    // 用户初始缩写（对应 Figma 9:30 的 "JD"）
-    const userInitials = (() => {
-        const parts = userName.trim().split(/\s+/).filter(Boolean);
-        if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-        return userName.slice(0, 2).toUpperCase();
-    })();
-
-    // 4种图标主题循环
-    const iconThemes = [
-        { bg: 'rgba(59,130,246,0.2)', border: 'rgba(59,130,246,0.3)', src: imgContainer10, w: '16.031px', h: '16.031px' },
-        { bg: 'rgba(16,185,129,0.2)', border: 'rgba(16,185,129,0.3)', src: imgContainer13, w: '16.034px', h: '18.002px' },
-        { bg: 'rgba(236,72,153,0.2)', border: 'rgba(236,72,153,0.3)', src: imgContainer14, w: '19.898px', h: '20.602px' },
-        { bg: 'rgba(168,85,247,0.2)', border: 'rgba(168,85,247,0.3)', src: imgContainer16, w: '21.984px', h: '16.652px' },
-    ];
 
     return (
-        // Figma node 9:2：bg-[#0f172a] flex flex-col isolate items-start relative size-full
+        // Figma node 9:2
         <div className="bg-[#0f172a] flex flex-col isolate items-start relative min-h-screen w-full" data-node-id="9:2">
 
             {/* ── 新建脑图弹窗 ── */}
-            {dialogOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center">
-                    {/* 遮罩 */}
-                    <div
-                        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                        onClick={() => {
-                            if (!createMutation.isPending) {
-                                setDialogOpen(false);
-                            }
-                        }}
-                    />
-                    {/* 弹窗主体 */}
-                    <div className="relative z-10 w-full max-w-[480px] mx-4 bg-[#1e293b] border border-[rgba(255,255,255,0.1)] rounded-[20px] p-[32px] flex flex-col gap-[24px]">
-                        <div className="flex flex-col gap-[6px]">
-                            <h2 className="text-[20px] font-bold text-white">新建脑图</h2>
-                            <p className="text-[14px] text-[#64748b]">填写名称与备注后开始创作</p>
-                        </div>
-                        {/* 标题输入 */}
-                        <div className="flex flex-col gap-[8px]">
-                            <label className="text-[13px] font-medium text-[#94a3b8]">脑图名称 <span className="text-[#be185d]">*</span></label>
-                            <input
-                                autoFocus
-                                type="text"
-                                placeholder="例：产品路线图 Q2"
-                                value={newTitle}
-                                onChange={(e) => setNewTitle(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleCreate()}
-                                className="w-full bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] px-[14px] py-[10px] text-[15px] text-white placeholder-[#475569] outline-none focus:border-[#be185d] transition-colors"
-                            />
-                        </div>
-                        {/* 备注输入 */}
-                        <div className="flex flex-col gap-[8px]">
-                            <label className="text-[13px] font-medium text-[#94a3b8]">备注（可选）</label>
-                            <textarea
-                                rows={3}
-                                placeholder="简要描述这张脑图的用途..."
-                                value={newDesc}
-                                onChange={(e) => setNewDesc(e.target.value)}
-                                className="w-full resize-none bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] px-[14px] py-[10px] text-[15px] text-white placeholder-[#475569] outline-none focus:border-[#be185d] transition-colors"
-                            />
-                        </div>
-                        {/* 操作按钮 */}
-                        <div className="flex gap-[12px] justify-end">
-                            <button
-                                onClick={() => setDialogOpen(false)}
-                                disabled={createMutation.isPending}
-                                className="px-[20px] py-[10px] rounded-[10px] text-[14px] font-medium text-[#94a3b8] bg-[rgba(255,255,255,0.05)] hover:bg-[rgba(255,255,255,0.1)] transition-colors"
-                            >
-                                取消
-                            </button>
-                            <button
-                                onClick={handleCreate}
-                                disabled={createMutation.isPending}
-                                className="px-[20px] py-[10px] rounded-[10px] text-[14px] font-semibold text-white bg-[#be185d] hover:bg-[#9d174d] disabled:opacity-60 transition-colors"
-                            >
-                                {createMutation.isPending ? '创建中...' : '创建脑图'}
-                            </button>
-                        </div>
-                    </div>
+            <Modal open={dialogOpen} onClose={() => setDialogOpen(false)} disabled={isCreating}>
+                <div className="flex flex-col gap-[6px]">
+                    <h2 className="text-[20px] font-bold text-white">新建脑图</h2>
+                    <p className="text-[14px] text-[#64748b]">填写名称与备注后开始创作</p>
                 </div>
-            )}
+                <div className="flex flex-col gap-[8px]">
+                    <label className="text-[13px] font-medium text-[#94a3b8]">脑图名称 <span className="text-[#be185d]">*</span></label>
+                    <input
+                        autoFocus
+                        type="text"
+                        placeholder="例：产品路线图 Q2"
+                        value={newTitle}
+                        onChange={(e) => setNewTitle(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleCreate()}
+                        className="w-full bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] px-[14px] py-[10px] text-[15px] text-white placeholder-[#475569] outline-none focus:border-[#be185d] transition-colors"
+                    />
+                </div>
+                <div className="flex flex-col gap-[8px]">
+                    <label className="text-[13px] font-medium text-[#94a3b8]">备注（可选）</label>
+                    <textarea
+                        rows={3}
+                        placeholder="简要描述这张脑图的用途..."
+                        value={newDesc}
+                        onChange={(e) => setNewDesc(e.target.value)}
+                        className="w-full resize-none bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-[10px] px-[14px] py-[10px] text-[15px] text-white placeholder-[#475569] outline-none focus:border-[#be185d] transition-colors"
+                    />
+                </div>
+                <div className="flex gap-[12px] justify-end">
+                    <button onClick={() => setDialogOpen(false)} disabled={isCreating} className="px-[20px] py-[10px] rounded-[10px] text-[14px] font-medium text-[#94a3b8] bg-[rgba(255,255,255,0.05)] hover:bg-[rgba(255,255,255,0.1)] transition-colors">取消</button>
+                    <button onClick={handleCreate} disabled={isCreating} className="px-[20px] py-[10px] rounded-[10px] text-[14px] font-semibold text-white bg-[#be185d] hover:bg-[#9d174d] disabled:opacity-60 transition-colors">
+                        {isCreating ? '创建中...' : '创建脑图'}
+                    </button>
+                </div>
+            </Modal>
 
             {/* ── 删除确认弹窗 ── */}
-            {deleteTarget && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center">
-                    <div
-                        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                        onClick={() => {
-                            if (!deleteMutation.isPending) {
-                                setDeleteTarget(null);
-                            }
-                        }}
-                    />
-                    <div className="relative z-10 w-full max-w-[400px] mx-4 bg-[#1e293b] border border-[rgba(255,255,255,0.1)] rounded-[20px] p-[32px] flex flex-col gap-[20px]">
-                        <div className="flex flex-col gap-[6px]">
-                            <h2 className="text-[20px] font-bold text-white">删除脑图</h2>
-                            <p className="text-[14px] text-[#94a3b8]">
-                                确定要删除「<span className="text-white font-medium">{deleteTarget.title}</span>」吗？此操作不可恢复。
-                            </p>
-                        </div>
-                        <div className="flex gap-[12px] justify-end">
-                            <button
-                                onClick={() => setDeleteTarget(null)}
-                                disabled={deleteMutation.isPending}
-                                className="px-[20px] py-[10px] rounded-[10px] text-[14px] font-medium text-[#94a3b8] bg-[rgba(255,255,255,0.05)] hover:bg-[rgba(255,255,255,0.1)] transition-colors"
-                            >
-                                取消
-                            </button>
-                            <button
-                                onClick={handleDeleteConfirm}
-                                disabled={deleteMutation.isPending}
-                                className="px-[20px] py-[10px] rounded-[10px] text-[14px] font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-60 transition-colors"
-                            >
-                                {deleteMutation.isPending ? '删除中...' : '确认删除'}
-                            </button>
-                        </div>
-                    </div>
+            <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} disabled={isDeleting} maxWidth="400px">
+                <div className="flex flex-col gap-[6px]">
+                    <h2 className="text-[20px] font-bold text-white">删除脑图</h2>
+                    <p className="text-[14px] text-[#94a3b8]">
+                        确定要删除「<span className="text-white font-medium">{deleteTarget?.title}</span>」吗？此操作不可恢复。
+                    </p>
                 </div>
-            )}
+                <div className="flex gap-[12px] justify-end">
+                    <button onClick={() => setDeleteTarget(null)} disabled={isDeleting} className="px-[20px] py-[10px] rounded-[10px] text-[14px] font-medium text-[#94a3b8] bg-[rgba(255,255,255,0.05)] hover:bg-[rgba(255,255,255,0.1)] transition-colors">取消</button>
+                    <button onClick={handleDeleteConfirm} disabled={isDeleting} className="px-[20px] py-[10px] rounded-[10px] text-[14px] font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-60 transition-colors">
+                        {isDeleting ? '删除中...' : '确认删除'}
+                    </button>
+                </div>
+            </Modal>
 
             {/* ── Figma node 9:200 Background 渐变背景 ── */}
             <div
@@ -284,7 +166,7 @@ export function DashboardContent() {
             >
                 <div className="absolute bg-[rgba(255,255,255,0)] bottom-[-1px] right-[-1px] rounded-[9999px] shadow-[0px_25px_50px_-12px_rgba(0,0,0,0.25)] size-[56px]" />
                 <div className="relative shrink-0 size-[19.969px]">
-                    <img alt="" className="absolute block max-w-none size-full" src={imgContainer} />
+                    <img alt="" className="absolute block max-w-none size-full" src={ASSETS.fabPlus} />
                 </div>
             </button>
 
@@ -298,7 +180,7 @@ export function DashboardContent() {
                     <div className="bg-[#be185d] flex items-center justify-center relative rounded-[12px] shrink-0 size-[40px]" data-node-id="9:9">
                         <div className="-translate-y-1/2 absolute bg-[rgba(255,255,255,0)] left-0 rounded-[12px] shadow-[0px_10px_15px_-3px_rgba(190,24,93,0.2),0px_4px_6px_-4px_rgba(190,24,93,0.2)] size-[40px] top-1/2" />
                         <div className="h-[23.016px] relative shrink-0 w-[24px]">
-                            <img alt="" className="absolute block max-w-none size-full" src={imgContainer1} />
+                            <img alt="" className="absolute block max-w-none size-full" src={ASSETS.logoIcon} />
                         </div>
                     </div>
                     <div className="font-bold h-[28px] flex items-center text-[20px] text-white tracking-[-0.5px]" data-node-id="9:14">
@@ -317,7 +199,7 @@ export function DashboardContent() {
                         </div>
                         <div className="absolute bottom-[18.42%] flex flex-col items-start left-[12px] top-[18.42%]" data-node-id="9:20">
                             <div className="relative shrink-0 size-[17.054px]">
-                                <img alt="" className="absolute block max-w-none size-full" src={imgIcon} />
+                                <img alt="" className="absolute block max-w-none size-full" src={ASSETS.searchIcon} />
                             </div>
                         </div>
                     </div>
@@ -326,7 +208,7 @@ export function DashboardContent() {
                         {/* 铃铛 */}
                         <div className="flex flex-col items-center justify-center p-[8px] relative shrink-0" data-node-id="9:23">
                             <div className="h-[19.5px] relative shrink-0 w-[15.187px]">
-                                <img alt="" className="absolute block max-w-none size-full" src={imgContainer2} />
+                                <img alt="" className="absolute block max-w-none size-full" src={ASSETS.bellIcon} />
                             </div>
                         </div>
                         {/* 分隔线 */}
@@ -344,7 +226,7 @@ export function DashboardContent() {
                                 {userName}
                             </div>
                             <div className="h-[6.598px] relative shrink-0 w-[11.156px]">
-                                <img alt="" className="absolute block max-w-none size-full" src={imgContainer3} />
+                                <img alt="" className="absolute block max-w-none size-full" src={ASSETS.chevronIcon} />
                             </div>
                         </div>
                     </div>
@@ -361,35 +243,35 @@ export function DashboardContent() {
                         {/* 全部脑图（激活态） */}
                         <div className="bg-[rgba(255,255,255,0.1)] border-[#be185d] border-l-[3px] border-solid flex gap-[12px] items-center pl-[19px] pr-[16px] py-[12px] relative rounded-[8px] shrink-0 w-full" data-node-id="9:39">
                             <div className="relative shrink-0 size-[18px]">
-                                <img alt="" className="absolute block max-w-none size-full" src={imgContainer4} />
+                                <img alt="" className="absolute block max-w-none size-full" src={ASSETS.navAll} />
                             </div>
                             <div className="font-medium h-[24px] flex items-center text-[16px] text-white" data-node-id="9:43">全部脑图</div>
                         </div>
                         {/* 收藏 */}
                         <div className="flex gap-[12px] items-center px-[16px] py-[12px] relative rounded-[8px] shrink-0 w-full" data-node-id="9:44">
                             <div className="h-[16.357px] relative shrink-0 w-[17.098px]">
-                                <img alt="" className="absolute block max-w-none size-full" src={imgContainer5} />
+                                <img alt="" className="absolute block max-w-none size-full" src={ASSETS.navFav} />
                             </div>
                             <div className="font-medium h-[24px] flex items-center text-[#94a3b8] text-[16px]" data-node-id="9:48">收藏</div>
                         </div>
                         {/* 项目 */}
                         <div className="flex gap-[12px] items-center px-[16px] py-[12px] relative rounded-[8px] shrink-0 w-full" data-node-id="9:49">
                             <div className="h-[16.031px] relative shrink-0 w-[19.969px]">
-                                <img alt="" className="absolute block max-w-none size-full" src={imgContainer6} />
+                                <img alt="" className="absolute block max-w-none size-full" src={ASSETS.navProject} />
                             </div>
                             <div className="font-medium h-[24px] flex items-center text-[#94a3b8] text-[16px]" data-node-id="9:53">项目</div>
                         </div>
                         {/* 最近 */}
                         <div className="flex gap-[12px] items-center px-[16px] py-[12px] relative rounded-[8px] shrink-0 w-full" data-node-id="9:54">
                             <div className="h-[18.004px] relative shrink-0 w-[20.267px]">
-                                <img alt="" className="absolute block max-w-none size-full" src={imgContainer7} />
+                                <img alt="" className="absolute block max-w-none size-full" src={ASSETS.navRecent} />
                             </div>
                             <div className="font-medium h-[24px] flex items-center text-[#94a3b8] text-[16px]" data-node-id="9:58">最近</div>
                         </div>
                         {/* 回收站 */}
                         <div className="flex gap-[12px] items-center px-[16px] py-[12px] relative rounded-[8px] shrink-0 w-full" data-node-id="9:59">
                             <div className="h-[18px] relative shrink-0 w-[13.969px]">
-                                <img alt="" className="absolute block max-w-none size-full" src={imgContainer8} />
+                                <img alt="" className="absolute block max-w-none size-full" src={ASSETS.navTrash} />
                             </div>
                             <div className="font-medium h-[24px] flex items-center text-[#94a3b8] text-[16px]" data-node-id="9:63">回收站</div>
                         </div>
@@ -433,7 +315,7 @@ export function DashboardContent() {
                             >
                                 <div className="absolute bg-[rgba(255,255,255,0)] inset-[0_0.97px_0_0] rounded-[12px] shadow-[0px_10px_15px_-3px_rgba(190,24,93,0.2),0px_4px_6px_-4px_rgba(190,24,93,0.2)]" />
                                 <div className="relative shrink-0 size-[13.969px]">
-                                    <img alt="" className="absolute block max-w-none size-full" src={imgContainer9} />
+                                    <img alt="" className="absolute block max-w-none size-full" src={ASSETS.newPlus} />
                                 </div>
                                 <div className="font-semibold h-[24px] flex items-center text-[16px] text-center text-white" data-node-id="9:89">新建脑图</div>
                             </button>
@@ -461,7 +343,7 @@ export function DashboardContent() {
                                 <div className="flex max-w-[420px] flex-col items-center gap-[12px]">
                                     <div className="bg-[rgba(255,255,255,0.05)] flex items-center justify-center rounded-[9999px] size-[56px]">
                                         <div className="relative shrink-0 size-[13.969px]">
-                                            <img alt="" className="absolute block max-w-none size-full" src={imgContainer15} />
+                                            <img alt="" className="absolute block max-w-none size-full" src={ASSETS.createPlus} />
                                         </div>
                                     </div>
                                     <div className="text-[20px] font-semibold text-white">还没有脑图</div>
@@ -480,7 +362,7 @@ export function DashboardContent() {
                                 data-node-id="9:90"
                             >
                                 {maps.map((map, i) => {
-                                    const theme = iconThemes[i % 4];
+                                    const theme = ICON_THEMES[i % 4];
                                     return (
                                         <div
                                             key={map.id}
@@ -512,7 +394,7 @@ export function DashboardContent() {
                                                         className="flex flex-col items-center justify-center p-[6px] rounded-[8px] shrink-0 hover:bg-[rgba(255,255,255,0.1)] transition-colors"
                                                     >
                                                         <div className="h-[4.031px] relative shrink-0 w-[16.031px]">
-                                                            <img alt="" className="absolute block max-w-none size-full" src={imgContainer11} />
+                                                            <img alt="" className="absolute block max-w-none size-full" src={ASSETS.dotsMenu} />
                                                         </div>
                                                     </button>
                                                     {/* 下拉菜单 */}
@@ -556,7 +438,7 @@ export function DashboardContent() {
                                                     </div>
                                                     <div className="flex gap-[4px] items-center">
                                                         <div className="relative shrink-0 size-[9.984px]">
-                                                            <img alt="" className="absolute block max-w-none size-full" src={imgContainer12} />
+                                                            <img alt="" className="absolute block max-w-none size-full" src={ASSETS.clockIcon} />
                                                         </div>
                                                         <div className="font-normal h-[16px] flex items-center text-[#64748b] text-[12px]">{formatRelativeTime(map.updatedAt)}</div>
                                                     </div>
@@ -573,7 +455,7 @@ export function DashboardContent() {
                                 >
                                     <div className="bg-[rgba(255,255,255,0.05)] flex items-center justify-center rounded-[9999px] size-[48px]">
                                         <div className="relative shrink-0 size-[13.969px]">
-                                            <img alt="" className="absolute block max-w-none size-full" src={imgContainer15} />
+                                            <img alt="" className="absolute block max-w-none size-full" src={ASSETS.createPlus} />
                                         </div>
                                     </div>
                                     <div className="font-medium text-[#94a3b8] text-[16px]">创建新脑图</div>

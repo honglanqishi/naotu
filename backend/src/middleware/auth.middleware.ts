@@ -1,8 +1,9 @@
 import { Context, Next } from 'hono';
 import { auth } from '../lib/auth.js';
+import type { AppEnv } from '../types/hono.js';
 
 // better-auth session 验证中间件
-export async function authMiddleware(c: Context, next: Next) {
+export async function authMiddleware(c: Context<AppEnv>, next: Next) {
     const session = await auth.api.getSession({
         headers: c.req.raw.headers,
     });

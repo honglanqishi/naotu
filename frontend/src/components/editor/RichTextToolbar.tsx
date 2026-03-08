@@ -300,6 +300,8 @@ export function RichTextToolbar({ editorRef, isEditing, onEnterEdit, theme = 'da
     return (
         <div
             className="nodrag nopan nowheel"
+            tabIndex={-1}  // 禁止键盘 Tab 聚焦到工具栏容器，防止焦点逃出画布
+            onKeyDown={(e) => { if (e.key === 'Tab') e.preventDefault(); }} // 二次防御
             style={{
                 display: 'flex',
                 alignItems: 'center',

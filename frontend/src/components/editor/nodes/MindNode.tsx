@@ -361,7 +361,7 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
           style={{
             width: 8,
             height: 8,
-            background: 'var(--primary)',
+            background: '#C026D3',
             border: '2px solid rgba(255,255,255,0.3)',
           }}
         />
@@ -832,7 +832,7 @@ export function MindNodeComponent({ id, data, selected }: NodeProps) {
         style={{
           width: 8,
           height: 8,
-          background: 'var(--primary)',
+          background: '#C026D3',
           border: '2px solid rgba(255,255,255,0.3)',
         }}
       />

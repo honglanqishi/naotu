@@ -45,6 +45,21 @@
 | `backend/` | Hono.js v4 REST API，better-auth 认证，Drizzle ORM |
 | `database/` | Drizzle schema 定义 + 迁移脚本（PG & SQLite 双套） |
 
+### 后端关键模块
+
+| 文件 | 职责 |
+|---|---|
+| `backend/src/types/hono.ts` | 全局 `AppEnv` 类型（`AuthUser`、`AuthSession`），所有路由/中间件共用，**禁止在路由文件内重复定义 `Env`** |
+| `backend/src/services/reminders.service.ts` | 提醒业务逻辑：`ReminderCode`、`normalizeReminderCode`、`computeRemindAt`（数据驱动 `OFFSET_MS` map）、`syncReminders` |
+
+### 前端关键模块
+
+| 文件 | 职责 |
+|---|---|
+| `frontend/src/hooks/useMindMaps.ts` | 脑图列表 + 增删请求（包含 toast、路由跳转），`MindMap` 接口唯一声明处 |
+| `frontend/src/hooks/useAuthRedirect.ts` | Auth guard + Zustand 同步 + `getUserInitials()` 工具函数 |
+| `frontend/src/components/ui/Modal.tsx` | 通用弹窗（黑色背景 + 卡片），替代重复的弹窗 div 模板 |
+
 ## 关键开发命令
 
 ```bash
@@ -109,6 +124,203 @@ npm run migrate        # PostgreSQL（生产）
 
 ---
 
+## 代码规范与开发注意事项（2026-03-08 全工程审查后确立）
+
+> 以下规范源自一次完整的代码审查返工，**违反任一条都可能导致下次审查时再次重构**。
+
+### 一、后端规范
+
+#### ✅ 类型定义：只用 AppEnv，绝不在路由文件重复定义
+
+```typescript
+// ❌ 禁止 — 每个路由各自定义 Env
+// maps.ts
+type Env = { Variables: { user: { id: string } } }
+const app = new Hono<Env>()
+
+// tags.ts
+type Env = { Variables: { user: { id: string } } }  // 重复！
+
+// ✅ 正确 — 统一从 types/hono.ts 导入
+import type { AppEnv } from '../types/hono.js'
+const app = new Hono<AppEnv>()
+```
+
+唯一声明处：`backend/src/types/hono.ts`，修改类型只改这一个文件。
+
+#### ✅ 业务逻辑：放 service，不放路由
+
+路由文件只做三件事：**解析参数 → 调用 service → 返回响应**。任何超过 20 行的业务逻辑都应提取到 `backend/src/services/` 下。
+
+```typescript
+// ❌ 禁止 — 路由文件内写大段业务逻辑
+app.put('/:id', async (c) => {
+  // 100 行 switch 判断提醒偏移量...
+  // 循环同步数据库...
+})
+
+// ✅ 正确 — route 只调用 service
+import { syncReminders } from '../services/reminders.service.js'
+app.put('/:id', async (c) => {
+  const map = await db.update(...)
+  await syncReminders(map.id, nodes, userId)
+  return c.json({ success: true })
+})
+```
+
+#### ✅ 数据驱动替代 switch：用 Map/Record 查表
+
+```typescript
+// ❌ 禁止 — 100 行 switch
+switch (code) {
+  case 'on_day':     return new Date(start.getTime() - 0); break;
+  case 'min_5':      return new Date(start.getTime() - 5 * 60_000); break;
+  // ... 20 个 case
+}
+
+// ✅ 正确 — 数据驱动，1 行计算
+const OFFSET_MS: Record<ReminderCode, number> = {
+  on_day: 0,
+  min_5: 5 * 60_000,
+  min_15: 15 * 60_000,
+  // ...
+}
+const remindAt = new Date(startAt.getTime() - OFFSET_MS[code])
+```
+
+---
+
+### 二、前端规范
+
+#### ✅ 数据请求：必须封装成自定义 Hook
+
+凡是用到 `useQuery` / `useMutation` 的逻辑，**必须提取到 `frontend/src/hooks/` 下的自定义 hook**，不得直接写在组件文件里。
+
+```typescript
+// ❌ 禁止 — 组件内直接写 useQuery/useMutation
+export default function DashboardContent() {
+  const { data: maps } = useQuery({ queryKey: ['maps'], queryFn: ... })
+  const createMutation = useMutation({ mutationFn: ... })
+  // ... 组件内夹杂大量数据逻辑
+}
+
+// ✅ 正确 — 数据逻辑封装进 hook
+// hooks/useMindMaps.ts
+export function useMindMaps() {
+  const { data: maps, isLoading } = useQuery(...)
+  const { mutate: createMap } = useMutation(...)
+  return { maps, isLoading, createMap }
+}
+
+// 组件内只调用
+export default function DashboardContent() {
+  const { maps, isLoading, createMap } = useMindMaps()
+}
+```
+
+**现有 Hook 清单（新增前先确认是否可复用）：**
+
+| Hook | 职责 |
+|---|---|
+| `useMindMaps()` | 脑图列表查询 + 创建 + 删除（含 toast 和路由跳转） |
+| `useAuthRedirect()` | Auth guard + Zustand 同步，返回 `{ session, isPending }` |
+| `getUserInitials(name?)` | 从 `useAuthRedirect.ts` 导出的工具函数，取用户名首字母大写 |
+
+#### ✅ Auth 跳转：只用 useAuthRedirect，禁止各页面重复写
+
+```typescript
+// ❌ 禁止 — 各组件各自 useSession + useEffect + router.push
+useEffect(() => {
+  if (!session) router.push('/login')
+}, [session])
+
+// ✅ 正确 — 统一调用 hook，一行搞定
+const { session } = useAuthRedirect()  // 未登录自动跳转 /login
+```
+
+#### ✅ 弹窗：统一用 <Modal>，禁止重复写底层 div
+
+```tsx
+// ❌ 禁止 — 每个弹窗各自写蒙层 + 卡片 div
+<div className="fixed inset-0 z-50 bg-black/60 ...">
+  <div className="bg-[#1a1a1a] rounded-2xl ...">
+    ...
+  </div>
+</div>
+
+// ✅ 正确 — 统一用 Modal 组件
+import Modal from '@/components/ui/Modal'
+<Modal open={showDialog} onClose={() => setShowDialog(false)}>
+  ...内容...
+</Modal>
+```
+
+#### ✅ 常量：组件外声明，语义化命名
+
+```typescript
+// ❌ 禁止 — 16 个无意义变量名，写在组件内部
+const imgContainer1 = '/images/...'
+const imgContainer2 = '/images/...'
+// ... 到 imgContainer16
+
+// ✅ 正确 — 模块级常量对象，语义化 key
+const ASSETS = {
+  logo:        '/images/dashboard/logo.svg',
+  avatar:      '/images/dashboard/avatar.svg',
+  createPlus:  '/images/dashboard/create-plus.svg',
+  // ...
+} as const
+
+// ❌ 禁止 — 数组/配置定义在组件函数内（每次渲染重建）
+export default function Comp() {
+  const themes = [{ id: 1, color: '...' }, ...]
+}
+
+// ✅ 正确 — 模块顶部定义
+const THEMES = [{ id: 1, color: '...' }, ...] as const
+export default function Comp() { ... }
+```
+
+#### ✅ 接口/类型：唯一声明，从所有者模块导出
+
+```typescript
+// ❌ 禁止 — MindMap 接口在多个文件里各自定义
+// DashboardContent.tsx 里定义了 interface MindMap { ... }
+// useMindMaps.ts 里又定义了 interface MindMap { ... }
+
+// ✅ 正确 — 只在 hook 或 lib 里定义，组件 import
+// hooks/useMindMaps.ts
+export interface MindMap { id: string; title: string; ... }
+
+// DashboardContent.tsx
+import type { MindMap } from '@/hooks/useMindMaps'
+```
+
+---
+
+### 三、TypeScript 规范
+
+- **禁止使用 `any`**：路由参数用 Zod 推导类型，DB 查询结果用 Drizzle 推导类型。
+- **每次改动后必须通过编译**：`npx tsc --noEmit`，零错误才算完成。
+- **类型只声明一次**：接口/类型在最接近数据源的地方声明，其他地方 import，绝不复制粘贴。
+
+---
+
+### 四、提交前检查清单（每次开发完必须过一遍）
+
+```
+□ 后端有没有在路由文件里重复定义 Env 类型？       → 统一用 AppEnv
+□ 路由文件里有没有超过 20 行的业务逻辑内联？       → 提取到 services/
+□ 前端组件里有没有直接写 useQuery/useMutation？    → 封装进 hooks/
+□ 有没有重复的弹窗 div 模板代码？                  → 使用 <Modal>
+□ 常量/配置有没有定义在组件函数内部？               → 移至模块顶部
+□ 同一个接口有没有在多个文件里各自定义？             → 唯一声明
+□ 有没有用 getUserInitials 替代手动取首字母逻辑？   → 从 useAuthRedirect 导入
+□ 前后端 tsc --noEmit 是否零错误？                 → 必须过编译
+```
+
+---
+
 > 最后更新：2026-03-05 | 修复提醒同步字段不一致、提醒枚举归一化、XSS 防护与 worker 抢占发送
 
 ## Figma 设计稿还原（1:1 实现）
@@ -150,6 +362,31 @@ Get-ChildItem "D:\naotu\frontend\public\images" | Select-Object Name, Length
 
 代码中引用：`<img src="/images/node-2-174.svg" />`（`public/` 下直接用 `/` 路径）
 
+### ⚠️ img 尺寸铁律（违反必出变形）
+
+**每一个 `<img>` 标签必须同时写 `width` 和 `height`，数值直接取 Figma `data-name="Container"` 节点的精确尺寸，不得近似、不得省略任一轴。**
+
+```tsx
+// ❌ 错误 — 缺 height，浏览器 auto 推算与 SVG viewBox 不匹配
+<img src="..." style={{ width: 14 }} />
+
+// ❌ 错误 — 缺 width
+<img src="..." style={{ height: 15 }} />
+
+// ❌ 错误 — auto 是隐患
+<img src="..." style={{ width: 30, height: 'auto' }} />
+
+// ✅ 正确 — 两轴都写 Figma 精确值
+<img src="..." style={{ width: 13.969, height: 1.969 }} />
+<img src="..." style={{ width: 22.031, height: 12 }} />
+```
+
+Figma 代码中每个图标容器写法为：`<div className="... w-[13.969px]" data-name="Container">` 或 `size-[16.672px]` —— 取这两个值直接写入 style，绝不近似取整。
+
+每次 Figma 还原任务同时必须：
+1. 用 `Invoke-WebRequest` 将所有 `localhost:3845/assets/*.svg` **重新下载覆盖**本地旧文件（旧文件可能是占位 SVG）
+2. 下载后校验文件大小（正常图标 SVG 应 ≥ 400 bytes，几字节说明下载失败）
+
 ### inset 定位解读
 
 Figma 输出 `inset-[73.47%_66.42%_12.49%_21.67%]` 等价于 top/right/bottom/left，父容器必须有 `position: relative`：
@@ -176,3 +413,10 @@ cd D:\naotu\frontend ; npx tsc --noEmit 2>&1 | Select-Object -First 40
 ```
 
 ---
+
+
+> 最后更新：2026-03-07 | MapEditor 样式壳层按 Figma node 9:411 重构：固定锚点布局（Header/Left Aside/Right Aside/Bottom Controls）+ 英文文案对齐，保留 activeTool/zoomLevel/节点编辑与删除等原交互逻辑
+
+> 最后更新：2026-03-07 | 确立 img 双轴尺寸铁律：width+height 必须同时写且取 Figma Container 精确值（不得省略/近似/用 auto），重新下载全部 SVG 覆盖旧占位文件，修复颜色圆圈 ring（4px white）与 gap（18.8px）
+
+> 最后更新：2026-03-08 | 全工程代码审查重构：后端新增 `types/hono.ts`（AppEnv）消除路由重复 Env 类型；提醒逻辑提取到 `services/reminders.service.ts`（OFFSET_MS 数据驱动替代 100 行 switch）；前端新增 `hooks/useMindMaps`、`hooks/useAuthRedirect`、`components/ui/Modal` 三个复用模块；DashboardContent 从 589 行缩减为单职责 + 16 常量归并 ASSETS 对象；前后端 tsc --noEmit 零错误

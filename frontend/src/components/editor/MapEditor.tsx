@@ -7,7 +7,6 @@ import {
     addEdge,
     useNodesState,
     useEdgesState,
-    Controls,
     MiniMap,
     Background,
     BackgroundVariant,
@@ -128,12 +127,16 @@ function useAutoSave(
 // 内部编辑器（需要 useReactFlow，必须在 ReactFlowProvider 内）
 function MapEditorInner({ mapId }: { mapId: string }) {
     const router = useRouter();
-    const { screenToFlowPosition, fitView, getViewport } = useReactFlow();
+    const { screenToFlowPosition, fitView, getViewport, zoomIn, zoomOut } = useReactFlow();
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const initializedRef = useRef(false);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-    const [layoutStyle] = useState<LayoutStyle>('mindmap');
+    const [layoutStyle, setLayoutStyle] = useState<LayoutStyle>('mindmap');
+    /** 当前激活工具 */
+    const [activeTool, setActiveTool] = useState<'select' | 'addNode' | 'connect'>('select');
+    /** 当前缩放百分比（用于底栏显示） */
+    const [zoomLevel, setZoomLevel] = useState(100);
     /** 节点剪贴板：存储 Ctrl+C 复制的节点，用于 Ctrl+V 粘贴 */
     const [clipboard, setClipboard] = useState<Node[]>([]);
     /** clipboard 的 ref 版本，供 keydown handler 读取（避免 stale closure + updater 内 preventDefault 问题） */
@@ -212,6 +215,27 @@ function MapEditorInner({ mapId }: { mapId: string }) {
 
     // 自动保存（含 viewport）
     const isSaving = useAutoSave(mapId, nodes, edges, initializedRef.current, getViewport);
+
+    // ─── 右侧面板：当前选中节点 ──────────────────────────────────────────────
+    const selectedNode = nodes.find((n) => n.selected) ?? null;
+
+    /** 删除选中节点（含子孙） */
+    const deleteSelectedNode = useCallback(() => {
+        if (!selectedNode || selectedNode.data?.isRoot) return;
+        pushHistory();
+        const descendants = collectDescendants(selectedNode.id, edgesRef.current);
+        const toDelete = new Set([selectedNode.id, ...descendants]);
+        const nextNodes = nodesRef.current.filter((n) => !toDelete.has(n.id));
+        const nextEdges = edgesRef.current.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target));
+        setEdges(nextEdges);
+        setNodes(reLayout(nextNodes, nextEdges));
+    }, [selectedNode, pushHistory, setNodes, setEdges]); // eslint-disable-line
+
+    /** 修改选中节点的 label */
+    const updateSelectedNodeLabel = useCallback((label: string) => {
+        if (!selectedNode) return;
+        setNodes((nds) => nds.map((n) => n.id === selectedNode.id ? { ...n, data: { ...n.data, label } } : n));
+    }, [selectedNode, setNodes]);
 
     // 布局重算工具函数：保持根节点实际位置不变
     const reLayout = useCallback(
@@ -396,9 +420,16 @@ function MapEditorInner({ mapId }: { mapId: string }) {
 
             // ── Tab：新增子节点 ──────────────────────────────────────────
             if (e.key === 'Tab') {
+                // 焦点在输入框 / 富文本编辑区时，交给编辑区自己处理（缩进等）
+                if (
+                    document.activeElement instanceof HTMLInputElement ||
+                    document.activeElement instanceof HTMLTextAreaElement ||
+                    (document.activeElement as HTMLElement)?.isContentEditable
+                ) return;
+                // 无论是否有选中节点，都先阻止默认行为，防止焦点逃到工具栏按钮
+                e.preventDefault();
                 const selectedNode = nodes.find((n) => n.selected);
                 if (!selectedNode) return;
-                e.preventDefault();
 
                 pushHistory();
                 const childNode: Node = {
@@ -449,9 +480,10 @@ function MapEditorInner({ mapId }: { mapId: string }) {
             }
         };
 
-        const container = containerRef.current;
-        container?.addEventListener('keydown', handleKeyDown);
-        return () => container?.removeEventListener('keydown', handleKeyDown);
+        // 使用 document + capture 阶段，确保 Tab 键在焦点移动前被拦截，
+        // 即使焦点在 NodeToolbar portal（可能在 containerRef DOM 子树之外）的按钮上也能正常工作
+        document.addEventListener('keydown', handleKeyDown, true);
+        return () => document.removeEventListener('keydown', handleKeyDown, true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reLayout, setNodes, setEdges, undo, redo, pushHistory, setClipboard]); // 不依赖 nodes/edges，通过 ref 读取最新值
 
@@ -617,6 +649,12 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         },
         [setNodes, pushHistory],
     );
+
+    /** 修改选中节点的主题色（存入 decorations.highlight） */
+    const updateSelectedNodeColor = useCallback((color: string) => {
+        if (!selectedNode) return;
+        updateDecoration(selectedNode.id, 'highlight', color);
+    }, [selectedNode, updateDecoration]);
 
     // 构建右键菜单 actions
     const buildContextMenuActions = useCallback((): ContextMenuAction[] => {
@@ -1029,94 +1067,44 @@ function MapEditorInner({ mapId }: { mapId: string }) {
 
     if (isLoading) {
         return (
-            <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--background)' }}>
+            <div className="min-h-screen flex items-center justify-center" style={{ background: '#061616' }}>
                 <div
                     className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin"
-                    style={{ borderColor: 'var(--primary)', borderTopColor: 'transparent' }}
+                    style={{ borderColor: '#c31432', borderTopColor: 'transparent' }}
                 />
             </div>
         );
     }
 
+    // 选中节点的主题色
+    const selectedNodeColor = selectedNode
+        ? ((selectedNode.data as MindNodeData)?.decorations?.highlight ?? '#c31432')
+        : '#c31432';
+
     return (
         <div
             ref={containerRef}
-            className="w-full h-screen flex flex-col outline-none"
-            style={{ background: '#0f0f17' }}
+            className="w-full h-screen relative overflow-hidden outline-none"
+            style={{ background: '#061616' }}
             tabIndex={-1}
         >
-            {/* 顶栏 */}
-            <header
-                className="flex items-center justify-between px-4 h-12 border-b z-10 flex-shrink-0"
-                style={{ background: 'rgba(15,15,23,0.9)', backdropFilter: 'blur(12px)', borderColor: 'var(--border)' }}
-            >
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={() => router.push('/dashboard')}
-                        className="flex items-center gap-1.5 text-sm transition-colors"
-                        style={{ color: 'var(--foreground-muted)' }}
-                    >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M19 12H5M12 19l-7-7 7-7" />
-                        </svg>
-                        返回
-                    </button>
-                    <span style={{ color: 'var(--border)' }}></span>
-                    <h1 className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
-                        {map?.title}
-                    </h1>
-                    <span
-                        className="text-xs px-2 py-0.5 rounded-full"
-                        style={{ background: 'rgba(99,102,241,0.15)', color: 'var(--primary)', border: '1px solid rgba(99,102,241,0.3)' }}
-                    >
-                        {nodes.length} 个主题
-                    </span>
-                    {/* 下钻面包屑 */}
-                    {drillStack.length > 0 && (
-                        <>
-                            <span style={{ color: 'var(--border)' }}>|</span>
-                            <button
-                                onClick={drillUp}
-                                className="flex items-center gap-1 text-xs transition-colors"
-                                style={{
-                                    color: 'var(--primary)',
-                                    background: 'rgba(99,102,241,0.1)',
-                                    padding: '2px 8px',
-                                    borderRadius: 6,
-                                    border: '1px solid rgba(99,102,241,0.2)',
-                                }}
-                            >
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                    <path d="M19 12H5M12 19l-7-7 7-7" />
-                                </svg>
-                                退出下钻（层级 {drillStack.length}）
-                            </button>
-                        </>
-                    )}
-                </div>
-                <div className="flex items-center gap-2">
-                    {isSaving && (
-                        <span className="text-xs" style={{ color: 'var(--foreground-subtle)' }}>
-                            保存中...
-                        </span>
-                    )}
-                </div>
-            </header >
+            {/* 背景渐变 */}
+            <div
+                className="absolute inset-0 pointer-events-none"
+                style={{ background: 'radial-gradient(ellipse 160% 100% at 50% 50%, #0a2d2d 0%, #061616 100%)' }}
+            />
 
-            {/* ReactFlow 画布 */}
-            < div
-                className="flex-1"
+            {/* ── ReactFlow 画布（底层） ── */}
+            <div
+                className="absolute inset-0 pt-16"
                 onContextMenu={onContextMenu}
                 onDoubleClick={onCanvasDoubleClick}
                 onMouseDown={(e) => {
-                    // 点击画布任意区域（非富文本编辑框/输入框）时，将焦点归还给容器
-                    // 保证键盘快捷键（Tab/Delete/Ctrl+Z 等）始终可用
                     const target = e.target as HTMLElement;
                     if (!target.isContentEditable && target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
                         containerRef.current?.focus();
                     }
-                }
-                }
+                }}
             >
                 <ReactFlow
                     nodes={displayNodes}
@@ -1133,39 +1121,393 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                     defaultViewport={map?.viewport || { x: 0, y: 0, zoom: 1 }}
                     zoomOnDoubleClick={false}
                     defaultEdgeOptions={{ type: 'hierarchyEdge' }}
-                    style={{ background: '#0f0f17' }}
+                    style={{ background: 'transparent' }}
                     onContextMenu={(e) => e.preventDefault()}
-                    /* ── 交互模式 ──────────────────────────────────────────
-                       右键拖拽 = 平移画布（panOnDrag: [2] 对应鼠标右键）
-                       左键拖拽 = 矩形框选（selectionOnDrag: true）
-                    ─────────────────────────────────────────────────────── */
                     panOnDrag={[2]}
                     selectionOnDrag={true}
                     selectionMode={SelectionMode.Partial}
                     panOnScroll={true}
+                    onMoveEnd={(_, viewport) => setZoomLevel(Math.round(viewport.zoom * 100))}
                 >
-                    <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(255,255,255,0.05)" />
-                    <Controls style={{ background: 'rgba(26,26,46,0.9)', border: '1px solid var(--border)', borderRadius: '12px' }} />
+                    <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(255,255,255,0.04)" />
                     <MiniMap
-                        style={{ background: 'rgba(26,26,46,0.9)', border: '1px solid var(--border)', borderRadius: '12px' }}
-                        maskColor="rgba(15,15,23,0.8)"
-                        nodeColor="var(--primary)"
+                        style={{
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: 12,
+                            width: 160,
+                            height: 112,
+                            opacity: 0.6,
+                            bottom: 32,
+                            right: 32,
+                        }}
+                        maskColor="rgba(6,22,22,0.6)"
+                        nodeColor={(n) => (n.data as MindNodeData)?.decorations?.highlight || '#c31432'}
                     />
                 </ReactFlow>
-            </div >
+            </div>
 
-            {/* 右键自定义菜单 */}
-            {
-                contextMenu && (
-                    <ContextMenu
-                        x={contextMenu.x}
-                        y={contextMenu.y}
-                        actions={buildContextMenuActions()}
-                        onClose={() => setContextMenu(null)}
-                    />
-                )
-            }
-        </div >
+            {/* ── Header ── */}
+            <header
+                className="absolute top-0 left-0 right-0 h-16 z-20 flex items-center justify-between border-b"
+                style={{
+                    padding: '0 25px',
+                    backdropFilter: 'blur(6px)',
+                    WebkitBackdropFilter: 'blur(6px)',
+                    background: 'rgba(255,255,255,0.05)',
+                    borderColor: 'rgba(255,255,255,0.1)',
+                }}
+            >
+                {/* 左侧：Logo + 面包屑 */}
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/images/editor/logo.svg" alt="logo" style={{ width: 30, height: 28.77 }} />
+                        <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.5px', color: '#fff', lineHeight: 1 }}>
+                            MindFlow <span style={{ color: '#c31432' }}>Pro</span>
+                        </span>
+                    </div>
+                    <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.1)' }} />
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => router.push('/dashboard')}
+                            className="transition-colors hover:text-white"
+                            style={{ fontSize: 14, color: '#94a3b8' }}
+                        >
+                            My Workspace
+                        </button>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/images/editor/breadcrumb-chevron.svg" alt="" style={{ width: 3.849, height: 6.508, opacity: 0.6 }} />
+                        <span style={{ fontSize: 14, fontWeight: 500, color: '#fff' }}>{map?.title || 'Untitled Project'}</span>
+                        {nodes.length > 0 && (
+                            <span
+                                className="text-xs px-2 py-0.5 rounded-full ml-1"
+                                style={{ background: 'rgba(195,20,50,0.15)', color: '#c31432', border: '1px solid rgba(195,20,50,0.3)' }}
+                            >
+                                {nodes.length} 个主题
+                            </span>
+                        )}
+                        {drillStack.length > 0 && (
+                            <button
+                                onClick={drillUp}
+                                className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors ml-1"
+                                style={{ color: '#94a3b8', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
+                            >
+                                ← 退出下钻（层级 {drillStack.length}）
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* 右侧：保存状态 + 按钮 + 头像 */}
+                <div className="flex items-center gap-4">
+                    {isSaving && (
+                        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>保存中...</span>
+                    )}
+                    <button
+                        className="flex items-center gap-2 rounded-lg font-medium text-white border transition-colors hover:bg-white/10"
+                        style={{ padding: '9px 17px', fontSize: 14, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
+                    >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/images/editor/share-icon.svg" alt="" style={{ width: 13.5, height: 14.941 }} />
+                        Share
+                    </button>
+                    <button
+                        className="flex items-center gap-2 rounded-lg font-medium text-white transition-colors"
+                        style={{ padding: '8px 16px', fontSize: 14, background: '#c31432', boxShadow: '0 10px 15px -3px rgba(195,20,50,0.2)' }}
+                        onClick={() => toast.info('Export is coming soon')}
+                    >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/images/editor/export-icon.svg" alt="" style={{ width: 10.477, height: 12.762 }} />
+                        Export
+                    </button>
+                    <div
+                        className="flex items-center justify-center rounded-full text-xs font-bold text-white border border-white/20 flex-shrink-0"
+                        style={{ width: 32, height: 32, background: 'linear-gradient(45deg, #c31432 0%, #d946ef 100%)' }}
+                    >
+                        JD
+                    </div>
+                </div>
+            </header>
+
+            {/* ── 左侧工具栏 ── */}
+            <aside
+                className="absolute left-6 z-20 flex flex-col gap-6 items-center rounded-2xl border"
+                style={{
+                    top: 325.5,
+                    padding: '25px 1px',
+                    backdropFilter: 'blur(6px)',
+                    WebkitBackdropFilter: 'blur(6px)',
+                    background: 'rgba(255,255,255,0.05)',
+                    borderColor: 'rgba(255,255,255,0.1)',
+                }}
+            >
+                {/* 选择 */}
+                <button
+                    onClick={() => setActiveTool('select')}
+                    className="p-2 rounded-xl transition-colors hover:bg-white/10"
+                    style={activeTool === 'select' ? { background: 'rgba(255,255,255,0.1)' } : {}}
+                    title="Select (V)"
+                >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/images/editor/select-tool.svg" alt="select" style={{ width: 16.672, height: 16.672 }} />
+                </button>
+
+                {/* 添加节点 */}
+                <button
+                    onClick={() => setActiveTool('addNode')}
+                    className="rounded-xl transition-colors relative"
+                    style={activeTool === 'addNode' ? {
+                        padding: 9,
+                        background: 'rgba(195,20,50,0.2)',
+                        border: '1px solid rgba(195,20,50,0.5)',
+                        boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.05)',
+                    } : { padding: 9 }}
+                    title="Add Node (N)"
+                >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/images/editor/add-node.svg" alt="add" style={{ width: 19.969, height: 19.969 }} />
+                </button>
+
+                {/* 连线 */}
+                <button
+                    onClick={() => setActiveTool('connect')}
+                    className="p-2 rounded-xl transition-colors hover:bg-white/10"
+                    style={activeTool === 'connect' ? { background: 'rgba(255,255,255,0.1)' } : {}}
+                    title="Connect (C)"
+                >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/images/editor/connect.svg" alt="connect" style={{ width: 22.031, height: 12 }} />
+                </button>
+
+                {/* 分割线 */}
+                <div style={{ width: 32, height: 1, background: 'rgba(255,255,255,0.1)' }} />
+
+                {/* 样式 */}
+                <button
+                    className="p-2 rounded-xl transition-colors hover:bg-white/10"
+                    title="Styles"
+                >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/images/editor/styles.svg" alt="styles" style={{ width: 19.969, height: 19.969 }} />
+                </button>
+
+                {/* 媒体 */}
+                <button
+                    className="p-2 rounded-xl transition-colors hover:bg-white/10"
+                    title="Media"
+                >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/images/editor/media.svg" alt="media" style={{ width: 18, height: 18 }} />
+                </button>
+            </aside>
+
+            {/* ── 右侧节点属性面板 ── */}
+            <aside
+                className="absolute right-6 z-20 rounded-2xl border overflow-hidden flex flex-col"
+                style={{
+                    top: 247,
+                    width: 288,
+                    height: 530,
+                    backdropFilter: 'blur(6px)',
+                    WebkitBackdropFilter: 'blur(6px)',
+                    background: 'rgba(255,255,255,0.05)',
+                    borderColor: 'rgba(255,255,255,0.1)',
+                }}
+            >
+                {/* 标题栏 */}
+                <div
+                    className="flex items-center gap-2 border-b flex-shrink-0"
+                    style={{ padding: '20px', borderColor: 'rgba(255,255,255,0.05)' }}
+                >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/images/editor/node-props-icon.svg" alt="" style={{ width: 18, height: 18 }} />
+                    <span style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Node Properties</span>
+                </div>
+
+                {/* 内容 */}
+                <div className="flex-1 overflow-y-auto flex flex-col gap-6" style={{ padding: 20 }}>
+                    {/* 标签文字 */}
+                    <div className="flex flex-col gap-2">
+                        <label style={{ fontSize: 12, fontWeight: 600, letterSpacing: '1.2px', textTransform: 'uppercase', color: '#94a3b8' }}>
+                            Label Text
+                        </label>
+                        <input
+                            className="w-full rounded-lg text-white border outline-none transition-colors"
+                            style={{
+                                padding: '9px 13px',
+                                fontSize: 14,
+                                background: 'rgba(255,255,255,0.05)',
+                                borderColor: 'rgba(255,255,255,0.1)',
+                            }}
+                            value={selectedNode ? String(selectedNode.data?.label ?? '') : ''}
+                            onChange={(e) => updateSelectedNodeLabel(e.target.value)}
+                            placeholder={selectedNode ? '' : 'Select a node to edit'}
+                            disabled={!selectedNode}
+                        />
+                    </div>
+
+                    {/* 主题颜色 */}
+                    <div className="flex flex-col gap-2">
+                        <label style={{ fontSize: 12, fontWeight: 600, letterSpacing: '1.2px', textTransform: 'uppercase', color: '#94a3b8' }}>
+                            Theme Color
+                        </label>
+                        <div className="flex items-center" style={{ gap: 18.8 }}>
+                            {(['#c31432', '#3b82f6', '#10b981', '#f59e0b', '#d946ef'] as const).map((color) => (
+                                <button
+                                    key={color}
+                                    className="rounded-full flex-shrink-0 transition-transform hover:scale-110"
+                                    style={{
+                                        width: 32,
+                                        height: 32,
+                                        background: color,
+                                        boxShadow: selectedNodeColor === color ? '0 0 0 4px white' : 'none',
+                                    }}
+                                    onClick={() => updateSelectedNodeColor(color)}
+                                    disabled={!selectedNode}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 节点图标 */}
+                    <div className="flex flex-col gap-2">
+                        <label style={{ fontSize: 12, fontWeight: 600, letterSpacing: '1.2px', textTransform: 'uppercase', color: '#94a3b8' }}>
+                            Node Icon
+                        </label>
+                        <div
+                            className="flex items-center gap-3 rounded-xl border"
+                            style={{ padding: 13, background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' }}
+                        >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src="/images/editor/rocket-icon.svg" alt="" style={{ width: 19.288, height: 19.288 }} />
+                            <span style={{ fontSize: 14, color: '#fff', flex: 1 }}>Rocket Launch</span>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src="/images/editor/chevron-down.svg" alt="" style={{ width: 6.508, height: 3.849, opacity: 0.6 }} />
+                        </div>
+                    </div>
+
+                    {/* 分割线 */}
+                    <div style={{ height: 1, background: 'rgba(255,255,255,0.05)' }} />
+
+                    {/* 开关 */}
+                    <div className="flex flex-col gap-4">
+                        <div className="flex items-center justify-between">
+                            <span style={{ fontSize: 14, color: '#fff' }}>Auto-layout</span>
+                            <button
+                                className="relative rounded-full transition-colors"
+                                style={{
+                                    width: 40,
+                                    height: 20,
+                                    background: layoutStyle === 'mindmap' ? '#c31432' : 'rgba(255,255,255,0.15)',
+                                }}
+                                onClick={() => setLayoutStyle(layoutStyle === 'mindmap' ? 'tree-lr' : 'mindmap')}
+                            >
+                                <div
+                                    className="absolute top-1 rounded-full bg-white transition-all"
+                                    style={{
+                                        width: 12,
+                                        height: 12,
+                                        right: layoutStyle === 'mindmap' ? 4 : 'auto',
+                                        left: layoutStyle === 'mindmap' ? 'auto' : 4,
+                                    }}
+                                />
+                            </button>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span style={{ fontSize: 14, color: '#fff' }}>Glass Effect</span>
+                            <div
+                                className="relative rounded-full"
+                                style={{ width: 40, height: 20, background: '#c31432' }}
+                            >
+                                <div className="absolute top-1 right-1 rounded-full bg-white" style={{ width: 12, height: 12 }} />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* 删除按钮 */}
+                <div className="flex-shrink-0" style={{ padding: 20, background: 'rgba(255,255,255,0.05)' }}>
+                    <button
+                        onClick={deleteSelectedNode}
+                        disabled={!selectedNode || !!selectedNode.data?.isRoot}
+                        className="w-full rounded-lg font-bold text-white text-center border transition-colors disabled:opacity-40 hover:bg-white/10"
+                        style={{
+                            padding: '9px 1px',
+                            fontSize: 12,
+                            background: 'rgba(255,255,255,0.05)',
+                            borderColor: 'rgba(255,255,255,0.1)',
+                        }}
+                    >
+                        DELETE NODE
+                    </button>
+                </div>
+            </aside>
+
+            {/* ── 底部缩放工具栏 ── */}
+            <div
+                className="absolute bottom-8 left-1/2 z-20 flex items-center gap-4 rounded-full border"
+                style={{
+                    transform: 'translateX(-50%)',
+                    width: 288,
+                    padding: '13px 25px',
+                    backdropFilter: 'blur(6px)',
+                    WebkitBackdropFilter: 'blur(6px)',
+                    background: 'rgba(255,255,255,0.05)',
+                    borderColor: 'rgba(255,255,255,0.1)',
+                }}
+            >
+                {/* 缩放控件 */}
+                <div className="flex items-center gap-2">
+                    <button
+                        className="p-1 rounded-md transition-colors hover:bg-white/10"
+                        onClick={() => zoomOut({ duration: 200 })}
+                        title="Zoom Out"
+                    >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/images/editor/zoom-out.svg" alt="-" style={{ width: 13.969, height: 1.969 }} />
+                    </button>
+                    <span className="text-center font-bold text-white" style={{ fontSize: 12, width: 48 }}>{zoomLevel}%</span>
+                    <button
+                        className="p-1 rounded-md transition-colors hover:bg-white/10"
+                        onClick={() => zoomIn({ duration: 200 })}
+                        title="Zoom In"
+                    >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src="/images/editor/zoom-in.svg" alt="+" style={{ width: 13.969, height: 13.969 }} />
+                    </button>
+                </div>
+
+                <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.2)' }} />
+
+                {/* 适应视口 */}
+                <button
+                    className="p-1 rounded-md transition-colors hover:bg-white/10"
+                    onClick={() => fitView({ padding: 0.2, duration: 400 })}
+                    title="Fit View"
+                >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/images/editor/fit-view.svg" alt="fit" style={{ width: 10.5, height: 10.5 }} />
+                </button>
+
+                <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.2)' }} />
+
+                <button className="p-1 rounded-md transition-colors hover:bg-white/10" title="Lock">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/images/editor/lock.svg" alt="lock" style={{ width: 10.477, height: 10.474 }} />
+                </button>
+            </div>
+
+            {/* ── 右键菜单 ── */}
+            {contextMenu && (
+                <ContextMenu
+                    x={contextMenu.x}
+                    y={contextMenu.y}
+                    actions={buildContextMenuActions()}
+                    onClose={() => setContextMenu(null)}
+                />
+            )}
+        </div>
     );
 }
 

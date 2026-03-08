@@ -5,20 +5,14 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { tags, generateId } from '../db/tables.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
-
-type Env = {
-    Variables: {
-        user: any;
-        session: any;
-    };
-};
+import type { AppEnv } from '../types/hono.js';
 
 const createTagSchema = z.object({
     name: z.string().min(1).max(50),
     color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
 });
 
-export const tagsRoutes = new Hono<Env>();
+export const tagsRoutes = new Hono<AppEnv>();
 
 tagsRoutes.use('*', authMiddleware);
 

@@ -1,7 +1,7 @@
 'use client';
 
 /* eslint-disable @next/next/no-img-element */
-import { useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatRelativeTime } from '@/lib/utils';
 import { useMindMaps, type MindMap } from '@/hooks/useMindMaps';
@@ -39,6 +39,91 @@ const ICON_THEMES = [
     { bg: 'rgba(168,85,247,0.2)', border: 'rgba(168,85,247,0.3)', src: ASSETS.card4Icon, w: '21.984px', h: '16.652px' },
 ] as const;
 
+// ─── MapCard ──────────────────────────────────────────────────────────────────
+// 独立为 memo 组件：menuOpenId / deleteTarget 状态变化时只重渲染受影响的卡片
+interface MapCardProps {
+    map: MindMap;
+    theme: typeof ICON_THEMES[number];
+    userInitials: string;
+    isMenuOpen: boolean;
+    onMenuToggle: (id: string) => void;
+    onDeleteRequest: (map: MindMap) => void;
+}
+
+const MapCard = memo(function MapCard({
+    map, theme, userInitials, isMenuOpen, onMenuToggle, onDeleteRequest,
+}: MapCardProps) {
+    const router = useRouter();
+
+    return (
+        <div
+            onClick={() => {
+                if (isMenuOpen) { onMenuToggle(map.id); return; }
+                router.push(`/map/${map.id}`);
+            }}
+            className="backdrop-blur-[5px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] border-solid flex flex-col items-start justify-between p-[21px] rounded-[16px] cursor-pointer relative"
+        >
+            <div className="flex items-start justify-between w-full">
+                <div
+                    className="flex items-center justify-center p-px relative rounded-[12px] shrink-0 size-[48px] border border-solid"
+                    style={{ background: theme.bg, borderColor: theme.border }}
+                >
+                    <div className="relative shrink-0" style={{ width: theme.w, height: theme.h }}>
+                        <img alt="" className="absolute block max-w-none size-full" src={theme.src} />
+                    </div>
+                </div>
+                {/* 三点菜单 */}
+                <div className="relative">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onMenuToggle(map.id); }}
+                        className="flex flex-col items-center justify-center p-[6px] rounded-[8px] shrink-0 hover:bg-[rgba(255,255,255,0.1)] transition-colors"
+                    >
+                        <div className="h-[4.031px] relative shrink-0 w-[16.031px]">
+                            <img alt="" className="absolute block max-w-none size-full" src={ASSETS.dotsMenu} />
+                        </div>
+                    </button>
+                    {isMenuOpen && (
+                        <div
+                            className="absolute right-0 top-[calc(100%+4px)] z-20 bg-[#1e293b] border border-[rgba(255,255,255,0.1)] rounded-[10px] py-[4px] shadow-xl min-w-[120px]"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onMenuToggle(map.id); router.push(`/map/${map.id}`); }}
+                                className="w-full text-left px-[14px] py-[8px] text-[14px] text-[#94a3b8] hover:bg-[rgba(255,255,255,0.05)] hover:text-white transition-colors"
+                            >
+                                打开编辑
+                            </button>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onDeleteRequest(map); }}
+                                className="w-full text-left px-[14px] py-[8px] text-[14px] text-red-400 hover:bg-[rgba(255,255,255,0.05)] hover:text-red-300 transition-colors"
+                            >
+                                删除
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
+            <div className="flex flex-col gap-[4px] flex-1 justify-center">
+                <div className="font-semibold leading-[28px] text-[18px] text-white line-clamp-2">{map.title}</div>
+                <div className="font-normal leading-[20px] text-[#94a3b8] text-[14px] line-clamp-3">{map.description || ''}</div>
+            </div>
+            <div className="border-[rgba(255,255,255,0.05)] border-solid border-t w-full">
+                <div className="flex items-center justify-between pt-[17px] w-full">
+                    <div className="bg-[#475569] border-2 border-[#1e293b] border-solid flex items-center justify-center rounded-[9999px] shrink-0 size-[28px]">
+                        <p className="font-bold text-[#f1f5f9] text-[10px]">{userInitials}</p>
+                    </div>
+                    <div className="flex gap-[4px] items-center">
+                        <div className="relative shrink-0 size-[9.984px]">
+                            <img alt="" className="absolute block max-w-none size-full" src={ASSETS.clockIcon} />
+                        </div>
+                        <div className="font-normal h-[16px] flex items-center text-[#64748b] text-[12px]">{formatRelativeTime(map.updatedAt)}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+});
+
 export function DashboardContent() {
     const router = useRouter();
 
@@ -60,32 +145,47 @@ export function DashboardContent() {
     const [deleteTarget, setDeleteTarget] = useState<MindMap | null>(null);
 
     // 点击页面任意空白处关闭菜单（冒泡阶段，按钮内部用 stopPropagation 防止误触发）
+    // passive:true → 浏览器无需等待 preventDefault 判断，滚动更流畅
     useEffect(() => {
         if (!menuOpenId) return;
         const handler = () => setMenuOpenId(null);
-        document.addEventListener('click', handler);
+        document.addEventListener('click', handler, { passive: true });
         return () => document.removeEventListener('click', handler);
     }, [menuOpenId]);
 
-    const openDialog = () => {
+    // ── 稳定回调（useCallback）：setState setter 本身稳定，依赖数组可为空 ──
+    // 确保传给 memo 子组件的回调引用不变，避免 MapCard 不必要的重渲染
+
+    const openDialog = useCallback(() => {
         setNewTitle('');
         setNewDesc('');
         setDialogOpen(true);
-    };
+    }, []);
 
-    const handleCreate = () => {
+    const handleCreate = useCallback(() => {
         if (isCreating) return;
         const title = newTitle.trim() || `新建脑图 ${new Date().toLocaleString('zh-CN', { hour12: false })}`;
         createMap(
             { title, description: newDesc.trim() || undefined },
             { onSuccess: () => { setDialogOpen(false); setNewTitle(''); setNewDesc(''); } },
         );
-    };
+    }, [isCreating, newTitle, newDesc, createMap]);
 
-    const handleDeleteConfirm = () => {
+    const handleDeleteConfirm = useCallback(() => {
         if (!deleteTarget || isDeleting) return;
         deleteMap(deleteTarget.id, { onSuccess: () => setDeleteTarget(null) });
-    };
+    }, [deleteTarget, isDeleting, deleteMap]);
+
+    /** 切换指定卡片的三点菜单（传给 MapCard，引用稳定） */
+    const handleMenuToggle = useCallback((id: string) => {
+        setMenuOpenId((prev) => (prev === id ? null : id));
+    }, []);
+
+    /** 触发删除确认弹窗（传给 MapCard，引用稳定） */
+    const handleDeleteRequest = useCallback((map: MindMap) => {
+        setMenuOpenId(null);
+        setDeleteTarget(map);
+    }, []);
 
     const userName = session?.user?.name || session?.user?.email || '访客用户';
     const userInitials = getUserInitials(session?.user?.name || session?.user?.email);
@@ -361,92 +461,17 @@ export function DashboardContent() {
                                 className="grid grid-cols-4 gap-[20px] shrink-0 w-full auto-rows-[280px]"
                                 data-node-id="9:90"
                             >
-                                {maps.map((map, i) => {
-                                    const theme = ICON_THEMES[i % 4];
-                                    return (
-                                        <div
-                                            key={map.id}
-                                            onClick={() => {
-                                                if (menuOpenId === map.id) {
-                                                    setMenuOpenId(null);
-                                                    return;
-                                                }
-                                                router.push(`/map/${map.id}`);
-                                            }}
-                                            className="backdrop-blur-[5px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] border-solid flex flex-col items-start justify-between p-[21px] rounded-[16px] cursor-pointer relative"
-                                        >
-                                            <div className="flex items-start justify-between w-full">
-                                                <div
-                                                    className="flex items-center justify-center p-px relative rounded-[12px] shrink-0 size-[48px] border border-solid"
-                                                    style={{ background: theme.bg, borderColor: theme.border }}
-                                                >
-                                                    <div className="relative shrink-0" style={{ width: theme.w, height: theme.h }}>
-                                                        <img alt="" className="absolute block max-w-none size-full" src={theme.src} />
-                                                    </div>
-                                                </div>
-                                                {/* 三点菜单按钮 */}
-                                                <div className="relative">
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setMenuOpenId((prev) => (prev === map.id ? null : map.id));
-                                                        }}
-                                                        className="flex flex-col items-center justify-center p-[6px] rounded-[8px] shrink-0 hover:bg-[rgba(255,255,255,0.1)] transition-colors"
-                                                    >
-                                                        <div className="h-[4.031px] relative shrink-0 w-[16.031px]">
-                                                            <img alt="" className="absolute block max-w-none size-full" src={ASSETS.dotsMenu} />
-                                                        </div>
-                                                    </button>
-                                                    {/* 下拉菜单 */}
-                                                    {menuOpenId === map.id && (
-                                                        <div
-                                                            className="absolute right-0 top-[calc(100%+4px)] z-20 bg-[#1e293b] border border-[rgba(255,255,255,0.1)] rounded-[10px] py-[4px] shadow-xl min-w-[120px]"
-                                                            onClick={(e) => e.stopPropagation()}
-                                                        >
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setMenuOpenId(null);
-                                                                    router.push(`/map/${map.id}`);
-                                                                }}
-                                                                className="w-full text-left px-[14px] py-[8px] text-[14px] text-[#94a3b8] hover:bg-[rgba(255,255,255,0.05)] hover:text-white transition-colors"
-                                                            >
-                                                                打开编辑
-                                                            </button>
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setMenuOpenId(null);
-                                                                    setDeleteTarget(map);
-                                                                }}
-                                                                className="w-full text-left px-[14px] py-[8px] text-[14px] text-red-400 hover:bg-[rgba(255,255,255,0.05)] hover:text-red-300 transition-colors"
-                                                            >
-                                                                删除
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            <div className="flex flex-col gap-[4px] flex-1 justify-center">
-                                                <div className="font-semibold leading-[28px] text-[18px] text-white line-clamp-2">{map.title}</div>
-                                                <div className="font-normal leading-[20px] text-[#94a3b8] text-[14px] line-clamp-3">{map.description || ''}</div>
-                                            </div>
-                                            <div className="border-[rgba(255,255,255,0.05)] border-solid border-t w-full">
-                                                <div className="flex items-center justify-between pt-[17px] w-full">
-                                                    <div className="bg-[#475569] border-2 border-[#1e293b] border-solid flex items-center justify-center rounded-[9999px] shrink-0 size-[28px]">
-                                                        <p className="font-bold text-[#f1f5f9] text-[10px]">{userInitials}</p>
-                                                    </div>
-                                                    <div className="flex gap-[4px] items-center">
-                                                        <div className="relative shrink-0 size-[9.984px]">
-                                                            <img alt="" className="absolute block max-w-none size-full" src={ASSETS.clockIcon} />
-                                                        </div>
-                                                        <div className="font-normal h-[16px] flex items-center text-[#64748b] text-[12px]">{formatRelativeTime(map.updatedAt)}</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
+                                {maps.map((map, i) => (
+                                    <MapCard
+                                        key={map.id}
+                                        map={map}
+                                        theme={ICON_THEMES[i % 4]}
+                                        userInitials={userInitials}
+                                        isMenuOpen={menuOpenId === map.id}
+                                        onMenuToggle={handleMenuToggle}
+                                        onDeleteRequest={handleDeleteRequest}
+                                    />
+                                ))}
                                 {/* 末尾：创建新脑图虚线卡 */}
                                 <button
                                     onClick={openDialog}

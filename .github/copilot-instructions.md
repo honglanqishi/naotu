@@ -321,6 +321,144 @@ import type { MindMap } from '@/hooks/useMindMaps'
 
 ---
 
+## React & Next.js 性能规范（2026-03-08 Vercel React Best Practices 审查后确立）
+
+> 以下规范来自 Vercel 官方 React 性能指南（57 条规则），已针对本项目裁剪为必须执行的核心条目。
+
+### 一、Concurrent Mode（并发模式）
+
+**React 19 / Next.js 15 已自动开启 Concurrent Mode**（`createRoot` 默认行为），不需要任何配置。  
+但你必须主动利用并发特性：
+
+| 特性 | 用途 | 触发场景 |
+|---|---|---|
+| `Suspense` | 流式 SSR + 骨架屏 | 每个"加载中"都应包裹 Suspense |
+| `useTransition` | 非紧迫状态更新（不阻塞输入） | 搜索过滤、排序、大数据更新 |
+| `useDeferredValue` | 推迟昂贵的子树重渲染 | 大量节点的思维导图过滤 |
+
+### 二、Bundle 分包（CRITICAL）
+
+#### ✅ 重型客户端组件必须用 next/dynamic + ssr:false
+
+> ⚠️ **Next.js 15 约束**：`ssr: false` 只能在 `'use client'` 组件中使用，Server Component 里直接写会报构建错误。
+> 正确做法：把动态导入封装成一个 Client Component 包装层，再由 Server Component 页面引入该包装层。
+
+```tsx
+// ❌ 禁止 — 直接 import，@xyflow/react (~300KB) 参与 SSR bundle，首屏阻塞
+import { MapEditor } from '@/components/editor/MapEditor';
+return <MapEditor mapId={id} />;
+
+// ❌ 禁止 — Server Component（async function page）里直接写 ssr:false，Next.js 15 构建报错
+// app/map/[id]/page.tsx
+const MapEditor = dynamic(() => import('...'), { ssr: false }); // 💥 Build Error
+
+// ✅ 正确 — 分两步：
+// 第一步：创建 'use client' 包装层（components/editor/MapEditorClient.tsx）
+'use client';
+import dynamic from 'next/dynamic';
+const MapEditor = dynamic(
+    () => import('@/components/editor/MapEditor').then((m) => m.MapEditor),
+    { ssr: false },
+);
+export function MapEditorClient({ mapId }: { mapId: string }) {
+    return <MapEditor mapId={mapId} />;
+}
+
+// 第二步：Server Component 页面引入包装层 + Suspense
+import { MapEditorClient } from '@/components/editor/MapEditorClient';
+return (
+    <Suspense fallback={<LoadingSpinner />}>
+        <MapEditorClient mapId={id} />
+    </Suspense>
+);
+```
+
+**判断标准：满足任一条即用 `next/dynamic({ ssr: false })`：**
+- 依赖 `window` / `document` / `canvas` / WebGL
+- bundle 大小 > 50KB（如 @xyflow/react、Monaco Editor、图表库）
+- 仅在用户交互后才需要（拖拽、编辑器等）
+
+#### ✅ 不要从 barrel 文件（index.ts）导入
+
+```tsx
+// ❌ 禁止 — 触发整个 barrel，即使只用其中一个函数
+import { something } from '@/components';
+
+// ✅ 正确 — 直接导入文件路径
+import { something } from '@/components/SomeComponent';
+```
+
+### 三、Re-render 优化（MEDIUM）
+
+#### ✅ 列表项目组件必须用 React.memo
+
+```tsx
+// ❌ 禁止 — 任何父级 state 变化都触发所有 card 重渲
+{maps.map((map) => (
+    <div key={map.id} onClick={() => setMenuOpenId(map.id)}>...</div>
+))}
+
+// ✅ 正确 — 只有 props 变化的 card 才重渲染
+const MapCard = memo(function MapCard({ map, isMenuOpen, onMenuToggle }: Props) {
+    ...
+});
+{maps.map((map) => (
+    <MapCard key={map.id} isMenuOpen={menuOpenId === map.id} onMenuToggle={handleMenuToggle} />
+))}
+```
+
+#### ✅ 传给 memo 组件的回调必须用 useCallback 稳定化
+
+```tsx
+// ❌ 禁止 — 每次渲染创建新函数引用，破坏 memo 效果
+const handleMenuToggle = (id: string) => setMenuOpenId(...);
+
+// ✅ 正确 — setter 本身稳定，deps 为空
+const handleMenuToggle = useCallback((id: string) => {
+    setMenuOpenId((prev) => (prev === id ? null : id));
+}, []);
+```
+
+#### ✅ 只订阅回调内真正需要的 state（避免多余订阅）
+
+```tsx
+// ❌ 禁止 — 组件订阅了 count，但只在事件处理器里用到
+const count = useStore((s) => s.count);
+const handleClick = () => console.log(count);
+
+// ✅ 正确 — 用 ref 读取 transient value，组件不订阅
+const countRef = useRef(count);
+countRef.current = count;
+const handleClick = () => console.log(countRef.current);
+```
+
+### 四、事件监听规范
+
+```tsx
+// ❌ 禁止 — 默认 active listener，浏览器必须等待 preventDefault 判断
+document.addEventListener('click', handler);
+document.addEventListener('scroll', handler);
+
+// ✅ 正确 — passive:true，告知浏览器不会调用 preventDefault，滚动更流畅
+document.addEventListener('click', handler, { passive: true });
+document.addEventListener('scroll', handler, { passive: true });
+```
+
+> 注意：若处理器内**必须**调用 `e.preventDefault()`（如阻止表单提交），则不能加 passive。
+
+### 五、补充检查清单（每次开发完一并核对）
+
+```
+□ 新增重型组件（>50KB）有没有用 next/dynamic({ ssr: false })？
+□ 新增页面有没有 Suspense 流式 fallback？
+□ 列表渲染的 item 组件有没有 React.memo？
+□ 传给 memo 子组件的函数有没有 useCallback？
+□ document.addEventListener 有没有加 { passive: true }（不用 preventDefault 的场合）？
+□ 有没有在 Suspense 内启动数据请求（而不是在外层等待）？
+```
+
+---
+
 > 最后更新：2026-03-05 | 修复提醒同步字段不一致、提醒枚举归一化、XSS 防护与 worker 抢占发送
 
 ## Figma 设计稿还原（1:1 实现）
@@ -420,3 +558,5 @@ cd D:\naotu\frontend ; npx tsc --noEmit 2>&1 | Select-Object -First 40
 > 最后更新：2026-03-07 | 确立 img 双轴尺寸铁律：width+height 必须同时写且取 Figma Container 精确值（不得省略/近似/用 auto），重新下载全部 SVG 覆盖旧占位文件，修复颜色圆圈 ring（4px white）与 gap（18.8px）
 
 > 最后更新：2026-03-08 | 全工程代码审查重构：后端新增 `types/hono.ts`（AppEnv）消除路由重复 Env 类型；提醒逻辑提取到 `services/reminders.service.ts`（OFFSET_MS 数据驱动替代 100 行 switch）；前端新增 `hooks/useMindMaps`、`hooks/useAuthRedirect`、`components/ui/Modal` 三个复用模块；DashboardContent 从 589 行缩减为单职责 + 16 常量归并 ASSETS 对象；前后端 tsc --noEmit 零错误
+
+> 最后更新：2026-03-08 | React/Next.js 性能优化：MapEditor 改用 next/dynamic({ ssr:false })+Suspense 流式（@xyflow/react 不再阻塞 SSR）；DashboardContent 提取 MapCard 为 React.memo 组件（menuOpenId 状态变化只重渲受影响卡片）；openDialog/handleMenuToggle/handleDeleteRequest 改为 useCallback 稳定化；document.addEventListener 加 { passive: true }；前端 tsc --noEmit 零错误

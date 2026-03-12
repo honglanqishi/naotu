@@ -67,3 +67,10 @@ export const useAuthStore = create<AuthStore>()(
         { name: 'naotu-auth-store' }
     )
 );
+
+
+
+import {ColorName} from './tes.js';
+
+const colorKeys: ColorName = 'primary';
+const colorValue: string = 'blue';

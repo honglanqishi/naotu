@@ -1,8 +1,9 @@
 ﻿'use client';
 
-import { useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { signIn, signUp } from '@/lib/auth-client';
+import { isDesktop, desktopGoogleLogin, onLoginSuccess } from '@/lib/desktop-ipc';
 import { toast } from 'sonner';
 import Image from 'next/image';
 import { useAuthStore } from '@/store/authStore';
@@ -12,6 +13,7 @@ export function LoginForm() {
     // 邮符1登录/注册的 pending 状态改用局部 useState 维护，避免全局状态交叉污染。
     const { loadingProvider, setAuthLoading } = useAuthStore();
     const searchParams = useSearchParams();
+    const router = useRouter();
     const callbackUrl = searchParams.get('callbackUrl') || '/dashboard';
     const [isLoading, setIsLoading] = useState(false);
     const [isSignUp, setIsSignUp] = useState(false);
@@ -20,6 +22,16 @@ export function LoginForm() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
 
+    // 桌面端：监听主进程 OAuth 完成推送，自动跳转
+    useEffect(() => {
+        if (!isDesktop()) return;
+        const unsubscribe = onLoginSuccess(() => {
+            setAuthLoading(false);
+            toast.success('Google 登录成功');
+            router.push(callbackUrl);
+        });
+        return unsubscribe;
+    }, [callbackUrl, router, setAuthLoading]);
     const handleSignUp = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!name.trim()) {
@@ -69,6 +81,25 @@ export function LoginForm() {
 
     const handleGoogleLogin = async () => {
         setAuthLoading(true, 'google');
+
+        // 桌面端：通过主进程的 Loopback IP OAuth 流程
+        if (isDesktop()) {
+            try {
+                const result = await desktopGoogleLogin();
+                if (!result.success) {
+                    toast.error(result.error || 'Google 登录失败，请重试');
+                    setAuthLoading(false);
+                }
+                // 成功后由 onLoginSuccess 事件监听处理跳转
+            } catch (err) {
+                console.error('[Auth] Desktop Google login error:', err);
+                toast.error('桌面端 Google 登录出错');
+                setAuthLoading(false);
+            }
+            return;
+        }
+
+        // Web 端：使用 better-auth 的社交登录重定向
         try {
             const result = await signIn.social({
                 provider: 'google',

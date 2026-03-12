@@ -47,3 +47,26 @@
 | MapEditor 做 1:1 还原时工具栏/属性栏位置总是“居中漂移” | 用 `top:50% + translateY` 实现，无法匹配 Figma 的固定像素锚点（`left aside: top 325.5`、`right aside: top 247`） | 面板改为绝对像素锚点定位，并保持容器尺寸固定（`64x373`、`288x530`）以避免不同视口下偏移 |
 
 > 最后更新：2026-03-07 | 新增 Figma 1:1 还原陷阱：固定像素锚点面板不能使用 `translateY` 居中定位
+| Electron dev 模式 fork `.bin/tsx` 失败 (Windows) | `fork()` 尝试以 Node 模块方式执行 `.bin/tsx`，该文件在 Windows 为 bash shell 脚本 | 改用 `fork('src/index.ts', [], { execArgv: ['--import', 'tsx'], env: { ELECTRON_RUN_AS_NODE: '1' } })` |
+| Electron dev 模式 preload 加载 404 | `tsx` 直接运行 main.ts 时 `__dirname` 是 `src/`，但 preload 必须是编译后的 `.js` | 改为先 `tsc` 编译整个 electron/ 再 `npx electron .`（从 `dist/` 运行），废弃 tsx 直接跑主进程的方案 |
+
+> 最后更新：2026-03-09 | Electron 桌面端全功能补齐：链 SDK 安装（ethers/@solana/web3.js/bitcoinjs-lib），LoginForm 桌面端 OAuth IPC 适配，reminder worker 推送系统通知，main.ts 生产模式构建路径，dev:desktop 端到端启动验证通过
+| Electron 控制台报 `Unable to load preload script` + `module not found: ./ipc/channels.js`，Google 登录按钮无反应 | 开启 `sandbox:true` 时，preload 里的相对模块导入会在沙箱 `preloadRequire` 阶段失败，导致 `window.naotuDesktop` 未注入，登录逻辑退化为 Web 路径且被导航策略拦截 | `preload.ts` 禁止运行时相对导入：把 IPC 通道常量内联（仅保留 type import）；重新编译 `electron/dist` 后再启动 |
+| Google 登录弹出窗口白屏 | 主进程对所有响应统一注入 CSP，第三方 Google OAuth 页面资源被 CSP 拦截；同时 OAuth 启动 URL 未走 better-auth 标准入口 | CSP 仅对本地前后端 origin 注入；桌面端 OAuth 先调用 `POST /auth/sign-in/social` 获取 Google 授权 URL，再在 popup 加载返回的 `url` |
+| 桌面端改用系统浏览器后无法把登录态带回 Electron | Google/OAuth 登录在系统浏览器完成，session cookie 保存在浏览器上下文，Electron 无法直接读取 | 新增 `desktop/init → desktop/grant → desktop/consume` 一次性授权码桥接：浏览器端通过 `desktop-auth-bridge` 页面换取短时 grant，Electron loopback 回调消费 grant 获取 `sessionToken` 并注入 `better-auth.session_token` |
+| 系统浏览器 OAuth 出现 `state_mismatch` | 在 Electron 主进程里 `fetch /auth/sign-in/social` 会把 `better-auth.state` cookie 写到 Node 请求上下文，不在系统浏览器；同时 `/auth/sign-in/social` 仅接受 JSON，不接受表单 content-type | 改为浏览器访问 `/auth/desktop/start`，由页面脚本 `fetch('/auth/sign-in/social', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include' })` 获取 Google URL 后再跳转，确保 state 生成与校验都在同一浏览器会话 |
+| 系统浏览器启动页报 `sign-in/social failed: 403 INVALID_ORIGIN` | `backend/.env` 里 `BETTER_AUTH_URL` 误配为前端 `http://localhost:3000`，导致 better-auth 在开发态用错 baseURL/trusted origin，`Origin: http://localhost:3001` 被拒绝 | 在 `backend/src/lib/auth.ts` 增加开发环境兜底：若 `BETTER_AUTH_URL` 缺失或等于 `FRONTEND_URL`，自动回退到后端 origin（默认 `http://localhost:3001`），并把 `3000/3001/127.0.0.1` 都加入 `trustedOrigins` |
+| 桌面端 OAuth 成功后 `GET /api/maps` 持续 401 | 仅向后端 origin (`3001`) 注入了 `better-auth.session_token`，前端实际请求走 `3000` 同源 + rewrite，浏览器未携带 `3000` 域下 cookie | Electron 登录成功后同时向 `BACKEND_URL` 与 `FRONTEND_URL` 注入 session cookie，确保 `/api/*` 代理请求携带认证态 |
+| 修完 `INVALID_ORIGIN` 后又出现 `redirect_uri_mismatch` | 将开发态 `baseURL` 强制回退到后端 `3001`，会让 Google 授权链接里的 `redirect_uri` 变成 `http://localhost:3001/auth/callback/google`，与当前 Google Console 仅配置 `3000` 不一致 | 开发态 `baseURL` 改为“优先 `BETTER_AUTH_URL`，缺省用 `FRONTEND_URL`”；并把 `3001` 仅放入 `trustedOrigins`（不作为默认 redirect base） |
+| Google 登录成功但 `/api/maps` 持续 401，而 `/auth/get-session` 正常 | 前端 `api.ts` 在 `NEXT_PUBLIC_API_URL` 为空时用 `||` 回退到 `http://localhost:3001`，导致 `/api/*` 走跨域直连 3001；同时 auth-client 走同源 3000 rewrite，认证链路被分叉 | `api.ts` 改为 `process.env.NEXT_PUBLIC_API_URL ?? ''`，空字符串保持同源请求；`/auth/*` 与 `/api/*` 统一走 3000 rewrite，消除会话来源不一致 |
+| 桌面 OAuth 看似成功但后端接口持续 401（中间件能看到 cookie 名） | `desktop/grant` 用 `session.session.token` 发给 Electron 注入，该字段在当前 better-auth 流程下并不等于浏览器实际 cookie token 值，导致后端会话校验失败 | `desktop/grant` 改为从请求 `cookie` 头中直接提取 `better-auth.session_token`（或 `__Secure-` 版本）并作为 grant 载荷返回，Electron 注入后与浏览器会话一致 |
+
+> 最后更新：2026-03-09 | 修复 Electron preload 沙箱模块加载失败（`./ipc/channels.js`）导致桌面 IPC 注入失效与 Google 登录无响应问题
+> 最后更新：2026-03-09 | 修复 Google OAuth 弹窗白屏：CSP 注入范围收敛到本地 origin，并改为 better-auth 标准 `sign-in/social` 启动流程
+> 最后更新：2026-03-09 | 桌面端 OAuth 升级为系统浏览器标准流：loopback 回调 + 一次性 grant 桥接 + sessionToken 注入 Electron cookie
+> 最后更新：2026-03-09 | 修复系统浏览器 OAuth 的 state_mismatch：OAuth 启动从主进程 fetch 改为浏览器上下文 JSON fetch，保证 better-auth state cookie 一致性
+> 最后更新：2026-03-09 | 修复系统浏览器 OAuth 的 INVALID_ORIGIN：开发环境自动校正 better-auth baseURL/trustedOrigins，兼容 backend:3001 与 frontend:3000 双 origin
+> 最后更新：2026-03-09 | 修复桌面端 OAuth 后列表接口 401：登录成功后将 session cookie 同步注入 3001 与 3000 双 origin
+> 最后更新：2026-03-09 | 修复 OAuth 回归 `redirect_uri_mismatch`：开发态恢复以 `BETTER_AUTH_URL/FRONTEND_URL(3000)` 作为 redirect base，仅扩展 trustedOrigins 覆盖 3001
+> 最后更新：2026-03-09 | 修复登录成功后 maps 401 根因：`api.ts` 去掉 `|| http://localhost:3001` 回退，统一同源代理避免 auth/api 会话分叉
+> 最后更新：2026-03-09 | 修复桌面 OAuth 后 401 深层根因：grant 透传 token 改为直接使用浏览器 cookie 中的 session token，避免 `session.session.token` 与真实 cookie 值不一致

@@ -9,6 +9,30 @@ const schema = isProduction
     ? await import('../db/schema.js')
     : await import('../db/schema.sqlite.js');
 
+const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+const backendPort = process.env.BACKEND_PORT || '3001';
+const frontendPort = process.env.FRONTEND_PORT || '3000';
+const backendUrl = process.env.BACKEND_URL || `http://localhost:${backendPort}`;
+const configuredBetterAuthUrl = process.env.BETTER_AUTH_URL;
+
+const resolvedBetterAuthUrl = (() => {
+    if (isProduction) {
+        return configuredBetterAuthUrl || backendUrl;
+    }
+
+    // 开发环境：优先使用显式 BETTER_AUTH_URL；
+    // 未配置时默认走前端 origin（与 Google redirect_uri 常见配置一致）。
+    return configuredBetterAuthUrl || frontendUrl;
+})();
+
+const trustedOrigins = Array.from(new Set([
+    frontendUrl,
+    resolvedBetterAuthUrl,
+    backendUrl,
+    `http://127.0.0.1:${frontendPort}`,
+    `http://127.0.0.1:${backendPort}`,
+]));
+
 export const auth = betterAuth({
     database: drizzleAdapter(db, {
         provider: isProduction ? 'pg' : 'sqlite',
@@ -36,7 +60,7 @@ export const auth = betterAuth({
     },
 
     // 基础 URL
-    baseURL: process.env.BETTER_AUTH_URL || 'http://localhost:3001',
+    baseURL: resolvedBetterAuthUrl,
     basePath: '/auth',
 
     // Session 配置
@@ -53,10 +77,7 @@ export const auth = betterAuth({
     secret: process.env.BETTER_AUTH_SECRET!,
 
     // 信任的域名（允许这些来源的请求携带 session cookie）
-    trustedOrigins: [
-        process.env.FRONTEND_URL || 'http://localhost:3000',
-        process.env.BETTER_AUTH_URL || 'http://localhost:3001',
-    ],
+    trustedOrigins,
 });
 
 export type Auth = typeof auth;

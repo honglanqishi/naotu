@@ -6,6 +6,19 @@ import { emailService } from '../services/email.service.js';
 let isRunning = false;
 
 /**
+ * 当运行在 Electron 子进程中时，通过 IPC 向主进程推送系统通知。
+ * 非 Electron 环境（独立后端）静默忽略。
+ */
+function notifyDesktopParent(title: string, body: string, route?: string): void {
+    if (typeof process.send === 'function') {
+        process.send({
+            type: 'reminder:notify',
+            payload: { title, body, route },
+        });
+    }
+}
+
+/**
  * 待办提醒后台工作者
  * 定期检查并发送到期的提醒邮件
  */
@@ -59,6 +72,15 @@ export async function startReminderWorker() {
                     reminder.title,
                     reminder.notes || ''
                 );
+
+                // 2b. 同时推送桌面系统通知（Electron 环境下）
+                if (success) {
+                    notifyDesktopParent(
+                        `⏰ 待办提醒：${reminder.title}`,
+                        reminder.notes || '你有一个待办事项已到期',
+                        `/map/${reminder.mindmapId}`,
+                    );
+                }
 
                 // 3. 更新状态
                 await db

@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "comfyui-workflow-builder": {
+      "source": "mckruz/comfyui-expert",
+      "sourceType": "github",
+      "computedHash": "9e84cf97a46b145c90e0e2b8220f84e85ff939c81c2d72f49eccf5696fefb327"
+    },
     "sleek-design-mobile-apps": {
       "source": "sleekdotdesign/agent-skills",
       "sourceType": "github",

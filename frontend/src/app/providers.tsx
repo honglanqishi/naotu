@@ -5,11 +5,27 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Toaster, toast } from 'sonner';
+import { useDesktopNotifications } from '@/hooks/useDesktopNotifications';
 
 /**
  * 全局 401 和网络错误监听：捕获 api.ts 派发的事件，
  * 使用 Next.js router.push 做客户端软跳转，避免硬刷新丢失编辑状态。
  */
+/**
+ * 桌面端事件监听：交易状态推送 → toast，通知点击 → 路由跳转。
+ * Web 端静默降级。
+ */
+function DesktopBridge() {
+    useDesktopNotifications((update) => {
+        const statusMap = { pending: '⏳', confirmed: '✅', failed: '❌' };
+        const icon = statusMap[update.status] ?? '';
+        toast(`${icon} ${update.chain.toUpperCase()} 交易 ${update.status}`, {
+            description: update.message ?? `tx: ${update.txHash.slice(0, 12)}…`,
+        });
+    });
+    return null;
+}
+
 function AuthGuard() {
     const router = useRouter();
     useEffect(() => {
@@ -50,6 +66,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return (
         <QueryClientProvider client={queryClient}>
             <AuthGuard />
+            <DesktopBridge />
             {children}
             <Toaster position="top-right" richColors />
             {process.env.NODE_ENV === 'development' && (

@@ -2,7 +2,7 @@ import axios, { type AxiosResponse, type AxiosError } from 'axios';
 
 // axios 实例，自动携带 cookie（better-auth session cookie）
 export const api = axios.create({
-    baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001',
+    baseURL: process.env.NEXT_PUBLIC_API_URL ?? '',
     withCredentials: true, // 关键：携带 httpOnly cookie
     headers: {
         'Content-Type': 'application/json',

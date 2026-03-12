@@ -44,6 +44,23 @@
 | `frontend/` | Next.js 15 + React 19，页面路由、思维导图编辑器 |
 | `backend/` | Hono.js v4 REST API，better-auth 认证，Drizzle ORM |
 | `database/` | Drizzle schema 定义 + 迁移脚本（PG & SQLite 双套） |
+| `electron/` | Electron 桌面壳：主进程（IPC / 签名 / 密钥存储 / 系统通知）、preload 隔离层 |
+
+### Electron 桌面端模块
+
+| 文件 | 职责 |
+|---|---|
+| `electron/src/main.ts` | 主进程入口：`BrowserWindow`、子进程管理（backend/frontend dev server）、OAuth IPC、CSP、菜单 |
+| `electron/src/preload.ts` | `contextBridge` 隔离层，向 renderer 暴露 `window.naotuDesktop` 白名单 API |
+| `electron/src/ipc/channels.ts` | IPC 通道名枚举 + 全部类型合约（三端共用：主进程 / preload / renderer） |
+| `electron/src/ipc/handlers.ts` | `ipcMain.handle` 集中注册：钱包 CRUD、签名、通知、应用信息 |
+| `electron/src/services/keystore.ts` | 私钥本地加密存储（AES-256-GCM + PBKDF2 600K 迭代），文件落盘于 `%APPDATA%/naotu/vault/` |
+| `electron/src/services/signer.ts` | 多链签名抽象层：`ChainSigner` 接口 + `EvmSigner`/`SolanaSigner`/`BitcoinSigner`，链 SDK 延迟加载 |
+| `electron/src/services/notification.ts` | 系统级通知（`Notification` API）：交易状态推送、待办提醒、点击跳转 |
+| `electron/src/auth/oauth-desktop.ts` | 桌面端 Google OAuth（Loopback IP / RFC 8252 §7.3），临时 HTTP server + 系统浏览器 |
+| `frontend/src/lib/desktop-ipc.ts` | Renderer 侧 IPC 桥接层：封装 `window.naotuDesktop`，Web 端降级为 no-op |
+| `frontend/src/hooks/useWallet.ts` | 钱包管理 React Query hook（创建/导入/删除/签名），遵循项目 hook 封装规范 |
+| `frontend/src/hooks/useDesktopNotifications.ts` | 桌面端事件监听 hook：交易状态推送 → toast，通知点击 → 路由跳转 |
 
 ### 后端关键模块
 
@@ -58,6 +75,8 @@
 |---|---|
 | `frontend/src/hooks/useMindMaps.ts` | 脑图列表 + 增删请求（包含 toast、路由跳转），`MindMap` 接口唯一声明处 |
 | `frontend/src/hooks/useAuthRedirect.ts` | Auth guard + Zustand 同步 + `getUserInitials()` 工具函数 |
+| `frontend/src/hooks/useWallet.ts` | 桌面端钱包管理 hook（创建/导入/删除/签名），仅 Electron 环境启用 |
+| `frontend/src/hooks/useDesktopNotifications.ts` | 桌面端事件监听（交易状态/通知点击），Web 端静默降级 |
 | `frontend/src/components/ui/Modal.tsx` | 通用弹窗（黑色背景 + 卡片），替代重复的弹窗 div 模板 |
 
 ## 关键开发命令
@@ -560,3 +579,15 @@ cd D:\naotu\frontend ; npx tsc --noEmit 2>&1 | Select-Object -First 40
 > 最后更新：2026-03-08 | 全工程代码审查重构：后端新增 `types/hono.ts`（AppEnv）消除路由重复 Env 类型；提醒逻辑提取到 `services/reminders.service.ts`（OFFSET_MS 数据驱动替代 100 行 switch）；前端新增 `hooks/useMindMaps`、`hooks/useAuthRedirect`、`components/ui/Modal` 三个复用模块；DashboardContent 从 589 行缩减为单职责 + 16 常量归并 ASSETS 对象；前后端 tsc --noEmit 零错误
 
 > 最后更新：2026-03-08 | React/Next.js 性能优化：MapEditor 改用 next/dynamic({ ssr:false })+Suspense 流式（@xyflow/react 不再阻塞 SSR）；DashboardContent 提取 MapCard 为 React.memo 组件（menuOpenId 状态变化只重渲受影响卡片）；openDialog/handleMenuToggle/handleDeleteRequest 改为 useCallback 稳定化；document.addEventListener 加 { passive: true }；前端 tsc --noEmit 零错误
+
+> 最后更新：2026-03-09 | Electron 桌面端全功能补齐：链 SDK 依赖安装（ethers/@solana/web3.js/bitcoinjs-lib 等 6 包）；LoginForm 桌面端 Google OAuth 走 IPC（isDesktop→desktopGoogleLogin+onLoginSuccess 事件监听）；reminder.worker 通过 process.send() 向 Electron 主进程推送系统通知；main.ts 生产模式构建路径（standalone server+extraResources）；修复 Windows fork .bin/tsx 失败（改为 ELECTRON_RUN_AS_NODE+--import tsx）；修复 preload 加载 404（改为 tsc 编译后 electron . 启动）；dev:desktop 端到端验证通过；前后端+electron 三包 tsc --noEmit 零错误
+
+> 最后更新：2026-03-09 | 修复 Electron 沙箱 preload 模块加载失败（`module not found: ./ipc/channels.js`）：`preload.ts` 去除运行时相对导入并内联 IPC 通道常量，恢复 `window.naotuDesktop` 注入，桌面端 Google 登录按钮恢复响应
+> 最后更新：2026-03-09 | 修复桌面端 Google OAuth 白屏：`main.ts` 的 CSP 仅注入本地前后端 origin，`oauth-desktop.ts` 改为调用 better-auth 标准 `POST /auth/sign-in/social` 获取授权 URL 后再加载 popup
+> 最后更新：2026-03-09 | 桌面端 Google OAuth 升级为系统浏览器标准流（openExternal）：新增 `/auth/desktop/init|grant|consume` 一次性授权码桥接与 `frontend/app/desktop-auth-bridge` 页面，Electron 通过 loopback 回调消费 grant 后注入 `better-auth.session_token`
+> 最后更新：2026-03-09 | 修复系统浏览器 OAuth `state_mismatch`：新增 `/auth/desktop/start` 在浏览器上下文以 JSON `POST /auth/sign-in/social` 初始化 state，再跳转 Google，避免主进程 fetch 造成 cookie 上下文错位
+> 最后更新：2026-03-09 | 修复系统浏览器 OAuth `INVALID_ORIGIN`：`auth.ts` 开发环境自动修正 `BETTER_AUTH_URL` 误配（3000）为后端 origin（3001），并扩展 trustedOrigins 覆盖 localhost/127.0.0.1
+> 最后更新：2026-03-09 | 修复桌面端 OAuth 后 `GET /api/maps` 401：主进程登录成功后同时向 `BACKEND_URL` 与 `FRONTEND_URL` 注入 `better-auth.session_token`，覆盖 Next 同源代理场景
+> 最后更新：2026-03-09 | 修复 OAuth 回归 `redirect_uri_mismatch`：开发态 `auth.ts` 不再强制使用后端 3001 作为 baseURL，改为优先 `BETTER_AUTH_URL/FRONTEND_URL(3000)`，同时保留 3001 在 trustedOrigins 以兼容桌面启动 origin
+> 最后更新：2026-03-09 | 修复登录成功后列表 401 的最终根因：`frontend/api.ts` 在 `NEXT_PUBLIC_API_URL=''` 时被 `||` 回退到 3001，导致 `/auth` 与 `/api` 分叉；改为 `?? ''` 统一同源 rewrite
+> 最后更新：2026-03-09 | 修复桌面 OAuth 后接口仍 401：`/auth/desktop/grant` 不再用 `session.session.token`，改为从浏览器 `cookie` 头提取 `better-auth.session_token` 回传 Electron 注入

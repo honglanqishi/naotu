@@ -5,11 +5,16 @@
     "private": true,
     "scripts": {
         "postinstall": "npm run install:all",
-        "install:all": "npm install --prefix database && npm install --prefix backend && npm install --prefix frontend",
+        "install:all": "npm install --prefix database && npm install --prefix backend && npm install --prefix frontend && npm install --prefix electron",
         "predev": "node -e \"const {execSync}=require('child_process');['3001','3000'].forEach(p=>{try{const r=execSync(`netstat -ano`).toString();const lines=r.split('\\n').filter(l=>l.includes(':'+p) && l.includes('LISTENING'));lines.forEach(l=>{const pid=l.trim().split(/\\s+/).pop();if(pid&&pid!=='0')try{execSync('taskkill /F /PID '+pid,{stdio:'ignore'})}catch(e){}});}catch(e){}});console.log('Ports cleared')\"",
+        "predev:desktop": "node -e \"const {execSync}=require('child_process');['3001','3000'].forEach(p=>{try{const r=execSync(`netstat -ano`).toString();const lines=r.split('\\n').filter(l=>l.includes(':'+p) && l.includes('LISTENING'));lines.forEach(l=>{const pid=l.trim().split(/\\s+/).pop();if(pid&&pid!=='0')try{execSync('taskkill /F /PID '+pid,{stdio:'ignore'})}catch(e){}});}catch(e){}});console.log('Ports cleared')\"",
         "dev": "npm run migrate:local && concurrently --names \"backend,frontend\" --prefix-colors \"blue,green\" \"npm run dev:backend\" \"npm run dev:frontend\"",
         "dev:backend": "npm run dev --prefix backend",
         "dev:frontend": "npm run dev --prefix frontend",
+        "dev:desktop": "npm run migrate:local && cd electron && npx tsc && npx electron .",
+        "build:electron": "npm run build --prefix backend && npm run build --prefix frontend && cd electron && npm run build",
+        "pack:desktop": "npm run build:electron && cd electron && npm run pack",
+        "dist:desktop": "npm run build:electron && cd electron && npm run dist",
         "migrate:local": "npm run generate:local --prefix database && npm run migrate:local --prefix database",
         "migrate": "npm run migrate --prefix database",
         "dev:pg": "concurrently --names \"postgres,backend,frontend\" --prefix-colors \"yellow,blue,green\" \"docker-compose up postgres\" \"npm run dev:backend\" \"npm run dev:frontend\""

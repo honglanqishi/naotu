@@ -5,6 +5,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
+import { sql } from 'drizzle-orm';
+import { db } from './db/client.js';
 import { authRoutes } from './routes/auth.js';
 import { mapsRoutes } from './routes/maps.js';
 import { tagsRoutes } from './routes/tags.js';
@@ -55,6 +57,46 @@ app.get('/health', (c) => {
         version: '1.0.0',
         timestamp: new Date().toISOString(),
     });
+});
+
+// 数据库连通性诊断端点（带 10 秒超时，防止 Neon 查询挂起）
+app.get('/health/db', async (c) => {
+    const start = Date.now();
+    const dbMode = process.env.NODE_ENV === 'production' ? 'neon-http' : 'sqlite';
+    const hasDbUrl = !!process.env.DATABASE_URL;
+    const dbUrlHost = process.env.DATABASE_URL
+        ? new URL(process.env.DATABASE_URL).host
+        : 'N/A';
+
+    try {
+        const result = await Promise.race([
+            db.execute(sql`SELECT 1 as ok`),
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('DB_QUERY_TIMEOUT_10S')), 10_000)
+            ),
+        ]);
+        return c.json({
+            status: 'ok',
+            dbMode,
+            hasDbUrl,
+            dbUrlHost,
+            latencyMs: Date.now() - start,
+            result,
+        });
+    } catch (error) {
+        console.error('[health/db] Database check failed:', error);
+        return c.json(
+            {
+                status: 'error',
+                dbMode,
+                hasDbUrl,
+                dbUrlHost,
+                latencyMs: Date.now() - start,
+                message: String(error),
+            },
+            500
+        );
+    }
 });
 
 // =============================================

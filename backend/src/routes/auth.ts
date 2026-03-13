@@ -155,6 +155,17 @@ authRoutes.post('/desktop/consume', async (c) => {
     }
 });
 
-authRoutes.on(['GET', 'POST'], '/*', (c) => {
-    return auth.handler(c.req.raw);
+authRoutes.on(['GET', 'POST'], '/*', async (c) => {
+    const start = Date.now();
+    const method = c.req.method;
+    const path = c.req.path;
+    console.log(`[auth] ${method} ${path} — start`);
+    try {
+        const response = await auth.handler(c.req.raw);
+        console.log(`[auth] ${method} ${path} — done in ${Date.now() - start}ms, status=${response.status}`);
+        return response;
+    } catch (error) {
+        console.error(`[auth] ${method} ${path} — ERROR after ${Date.now() - start}ms:`, error);
+        return c.json({ error: 'Auth handler error', message: String(error) }, 500);
+    }
 });

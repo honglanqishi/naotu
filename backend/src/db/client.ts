@@ -41,7 +41,13 @@ if (process.env.NODE_ENV !== 'production') {
         logger: false,
     });
 
-    console.log('[db] Neon HTTP mode (serverless)');
+    // 打印连接信息（隐藏密码），帮助诊断 Vercel 环境问题
+    try {
+        const u = new URL(connectionString);
+        console.log(`[db] Neon HTTP mode — host: ${u.host}, db: ${u.pathname.slice(1)}, user: ${u.username}`);
+    } catch {
+        console.log('[db] Neon HTTP mode — (could not parse DATABASE_URL)');
+    }
 }
 
 export { db };

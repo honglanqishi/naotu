@@ -36,9 +36,10 @@ if (process.env.NODE_ENV !== 'production') {
     }
 
     const client = postgres(connectionString, {
-        max: 10,
-        idle_timeout: 30,
-        connect_timeout: 10,
+        max: 1,              // Serverless 每个函数实例只需 1 个连接
+        idle_timeout: 20,    // 20 秒空闲后释放连接
+        connect_timeout: 10, // 10 秒连不上直接报错，不挂起
+        ssl: 'require',      // Neon 强制 SSL
     });
 
     db = drizzlePg(client, {

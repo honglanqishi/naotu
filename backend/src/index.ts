@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import './bootstrap.js'; // 全局代理配置（必须紧跟 dotenv，早于所有网络相关模块）
 
-import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
@@ -9,14 +8,10 @@ import { secureHeaders } from 'hono/secure-headers';
 import { authRoutes } from './routes/auth.js';
 import { mapsRoutes } from './routes/maps.js';
 import { tagsRoutes } from './routes/tags.js';
+import { cronRoutes } from './routes/cron.js';
 import { startReminderWorker } from './workers/reminder.worker.js';
 
 const app = new Hono();
-
-// =============================================
-// 启动后台工作者
-// =============================================
-startReminderWorker();
 
 // =============================================
 // 全局中间件
@@ -56,6 +51,7 @@ app.get('/health', (c) => {
 app.route('/auth', authRoutes);
 app.route('/api/maps', mapsRoutes);
 app.route('/api/tags', tagsRoutes);
+app.route('/api/cron', cronRoutes);
 
 // =============================================
 // 404 处理
@@ -79,15 +75,15 @@ app.onError((err, c) => {
 });
 
 // =============================================
-// 启动服务器
+// 本地开发：启动 HTTP 服务器 + 提醒 Worker
+// Vercel 环境跳过（由 api/index.ts 接管请求，cron 路由处理提醒）
 // =============================================
-const port = Number(process.env.BACKEND_PORT) || 3001;
-
-console.log(`🚀 Naotu Backend running on port ${port}`);
-
-serve({
-    fetch: app.fetch,
-    port,
-});
+if (!process.env.VERCEL) {
+    startReminderWorker();
+    const { serve } = await import('@hono/node-server');
+    const port = Number(process.env.BACKEND_PORT) || 3001;
+    console.log(`🚀 Naotu Backend running on port ${port}`);
+    serve({ fetch: app.fetch, port });
+}
 
 export default app;

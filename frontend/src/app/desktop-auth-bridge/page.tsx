@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-export default function DesktopAuthBridgePage() {
+function DesktopAuthBridgeContent() {
     const searchParams = useSearchParams();
     const [message, setMessage] = useState('正在完成桌面端登录，请稍候...');
 
@@ -57,5 +57,21 @@ export default function DesktopAuthBridgePage() {
         <main className="flex min-h-screen items-center justify-center bg-[#0f0f2f] text-white">
             <div className="rounded-xl border border-white/20 bg-black/30 px-6 py-4 text-sm">{message}</div>
         </main>
+    );
+}
+
+export default function DesktopAuthBridgePage() {
+    return (
+        <Suspense
+            fallback={
+                <main className="flex min-h-screen items-center justify-center bg-[#0f0f2f] text-white">
+                    <div className="rounded-xl border border-white/20 bg-black/30 px-6 py-4 text-sm">
+                        正在完成桌面端登录，请稍候...
+                    </div>
+                </main>
+            }
+        >
+            <DesktopAuthBridgeContent />
+        </Suspense>
     );
 }

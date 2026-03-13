@@ -1,9 +1,9 @@
 // 根据 NODE_ENV 自动切换数据库：
 //   development → SQLite via libsql（本地文件，无需 Docker，无 native 编译）
-//   production  → PostgreSQL（Docker Compose 或 VPS）
+//   production  → Neon HTTP driver（专为 Serverless 设计，无 TCP 挂起问题）
 
 import { drizzle as drizzleLibsql } from 'drizzle-orm/libsql';
-import { drizzle as drizzlePg } from 'drizzle-orm/postgres-js';
+import { drizzle as drizzleNeon } from 'drizzle-orm/neon-http';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Db = any;
@@ -26,8 +26,8 @@ if (process.env.NODE_ENV !== 'production') {
 
     console.log(`[db] SQLite mode — ${sqlitePath}`);
 } else {
-    // ── 生产环境：PostgreSQL ──────────────────────────────────────────
-    const postgres = (await import('postgres')).default;
+    // ── 生产环境：Neon HTTP driver（Serverless 专用，无 TCP 连接挂起）──
+    const { neon } = await import('@neondatabase/serverless');
     const pgSchema = await import('./schema.js');
 
     const connectionString = process.env.DATABASE_URL;
@@ -35,19 +35,13 @@ if (process.env.NODE_ENV !== 'production') {
         throw new Error('DATABASE_URL environment variable is required');
     }
 
-    const client = postgres(connectionString, {
-        max: 1,              // Serverless 每个函数实例只需 1 个连接
-        idle_timeout: 20,    // 20 秒空闲后释放连接
-        connect_timeout: 10, // 10 秒连不上直接报错，不挂起
-        ssl: 'require',      // Neon 强制 SSL
-    });
-
-    db = drizzlePg(client, {
+    const sql = neon(connectionString);
+    db = drizzleNeon(sql, {
         schema: pgSchema,
         logger: false,
     });
 
-    console.log('[db] PostgreSQL mode');
+    console.log('[db] Neon HTTP mode (serverless)');
 }
 
 export { db };

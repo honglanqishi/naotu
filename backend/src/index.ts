@@ -19,14 +19,26 @@ const app = new Hono();
 app.use('*', logger());
 app.use('*', secureHeaders());
 // CORS：允许前端域名跨域访问
-// BETTER_AUTH_URL 是后端自身地址，不能用作 CORS origin
-// FRONTEND_URL 才是需要放行的浏览器来源
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+const allowedOrigins = new Set([
+    FRONTEND_URL,
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://127.0.0.1:3000',
+]);
 
 app.use(
     '*',
     cors({
-        origin: FRONTEND_URL,
+        origin: (origin) => {
+            if (!origin) return FRONTEND_URL;
+            const clean = origin.replace(/\/$/, '');
+            // 精确匹配 + 允许所有 *.vercel.app 预览域名
+            if (allowedOrigins.has(clean) || clean.endsWith('.vercel.app')) {
+                return clean;
+            }
+            return FRONTEND_URL;
+        },
         allowHeaders: ['Content-Type', 'Authorization', 'Cookie'],
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         credentials: true,

@@ -14,8 +14,14 @@ const cronRoutes = new Hono<AppEnv>();
  * 调用方在请求头加：x-cron-secret: <同一字符串>
  */
 cronRoutes.get('/reminders', async (c) => {
+    // 支持两种鉴权方式：
+    // 1. Vercel 内置 Cron 自动携带的 x-vercel-cron: 1 头
+    // 2. 外部 cron 服务（cron-job.org 等）使用 x-cron-secret
+    const isVercelCron = c.req.header('x-vercel-cron') === '1';
     const secret = c.req.header('x-cron-secret');
-    if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
+    const validSecret = !process.env.CRON_SECRET || secret === process.env.CRON_SECRET;
+
+    if (!isVercelCron && !validSecret) {
         return c.json({ error: 'Unauthorized' }, 401);
     }
 

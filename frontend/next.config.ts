@@ -4,12 +4,14 @@ const nextConfig: NextConfig = {
     output: 'standalone',  // Docker 部署优化
 
     // API 请求代理
-    // 本地开发：Next.js dev server 代理到 localhost:3001，避免跨域导致 cookie 失效
-    // Vercel 生产：BACKEND_INTERNAL_URL 必须设置为后端 Vercel URL，
-    //              否则回退到 localhost:3001（Vercel 上不存在，会 hang 30s 超时）
+    // Vercel 生产：由 app/auth/[...path]/route.ts 和 app/api/[...path]/route.ts 显式代理
+    // 本地开发：Next.js dev server 通过 rewrites 代理到 localhost:3001
     async rewrites() {
+        if (process.env.VERCEL) {
+            // Vercel 环境：Route Handler 已接管 /auth/* 和 /api/* 代理
+            return [];
+        }
         const backendUrl = process.env.BACKEND_INTERNAL_URL || 'http://localhost:3001';
-        console.log(`[next.config] rewrites destination: ${backendUrl}`);
         return [
             {
                 source: '/api/:path*',

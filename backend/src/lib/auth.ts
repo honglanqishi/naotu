@@ -9,13 +9,15 @@ const schema = isProduction
     ? await import('../db/schema.js')
     : await import('../db/schema.sqlite.js');
 
-const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+// 去尾斜杠：防止 better-auth origin 字符串匹配失败
+const strip = (s: string) => s.replace(/\/+$/, '');
+const frontendUrl = strip(process.env.FRONTEND_URL || 'http://localhost:3000');
 const backendPort = process.env.BACKEND_PORT || '3001';
 const frontendPort = process.env.FRONTEND_PORT || '3000';
-const backendUrl = process.env.BACKEND_URL || `http://localhost:${backendPort}`;
+const backendUrl = strip(process.env.BACKEND_URL || `http://localhost:${backendPort}`);
 const configuredBetterAuthUrl = process.env.BETTER_AUTH_URL;
 
-const resolvedBetterAuthUrl = (() => {
+const resolvedBetterAuthUrl = strip((() => {
     if (isProduction) {
         return configuredBetterAuthUrl || backendUrl;
     }
@@ -23,7 +25,7 @@ const resolvedBetterAuthUrl = (() => {
     // 开发环境：优先使用显式 BETTER_AUTH_URL；
     // 未配置时默认走前端 origin（与 Google redirect_uri 常见配置一致）。
     return configuredBetterAuthUrl || frontendUrl;
-})();
+})());
 
 const trustedOrigins = Array.from(new Set([
     frontendUrl,
@@ -32,6 +34,8 @@ const trustedOrigins = Array.from(new Set([
     `http://127.0.0.1:${frontendPort}`,
     `http://127.0.0.1:${backendPort}`,
 ]));
+
+console.log('[auth] config:', { frontendUrl, backendUrl, resolvedBetterAuthUrl, trustedOrigins });
 
 export const auth = betterAuth({
     database: drizzleAdapter(db, {

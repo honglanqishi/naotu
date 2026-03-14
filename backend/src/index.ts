@@ -154,107 +154,76 @@ app.get('/health/db', async (c) => {
     return c.json({ status: allOk ? 'ok' : 'error', ...diag }, allOk ? 200 : 500);
 });
 
-// ── 排除法第三轮：精准模拟真实请求 + 事务测试 ──────────
+// ── 排除法第四轮：fetch 间谍 + 修复后再验证 ─────────────
 app.get('/health/auth', async (c) => {
     const diag: Record<string, unknown> = {};
+    const fetchLogs: { url: string; method: string; latencyMs: number; status?: number; error?: string }[] = [];
 
-    // ① Auth 环境变量
-    diag.FRONTEND_URL = process.env.FRONTEND_URL ?? '(unset)';
-    diag.BACKEND_URL = process.env.BACKEND_URL ?? '(unset)';
-    diag.BETTER_AUTH_URL = process.env.BETTER_AUTH_URL ?? '(unset)';
-    diag.hasGoogleClientId = !!process.env.GOOGLE_CLIENT_ID;
-    diag.hasGoogleClientSecret = !!process.env.GOOGLE_CLIENT_SECRET;
-    diag.hasBetterAuthSecret = !!process.env.BETTER_AUTH_SECRET;
-
-    // ② 测试 INSERT 到 verifications 表（better-auth 写 state 就是这样做的）
-    {
+    // 替换 globalThis.fetch 为间谍版本，记录 better-auth 内部发起的所有请求
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        const method = init?.method || (input instanceof Request ? input.method : 'GET');
         const t0 = Date.now();
         try {
-            const result = await Promise.race([
-                db.execute(sql`
-                    INSERT INTO verifications (id, identifier, value, expires_at, created_at, updated_at)
-                    VALUES ('_diag_test_' || gen_random_uuid()::text, '_diag', 'test', NOW() + INTERVAL '1 minute', NOW(), NOW())
-                `),
-                new Promise<never>((_, rej) =>
-                    setTimeout(() => rej(new Error('INSERT_TIMEOUT_8S')), 8_000)
-                ),
-            ]);
-            // 清理测试数据
-            await db.execute(sql`DELETE FROM verifications WHERE identifier = '_diag'`).catch(() => {});
-            diag.insertVerification = { ok: true, latencyMs: Date.now() - t0 };
+            const resp = await originalFetch(input, init);
+            fetchLogs.push({ url, method, latencyMs: Date.now() - t0, status: resp.status });
+            return resp;
         } catch (e) {
-            diag.insertVerification = { error: String(e), latencyMs: Date.now() - t0 };
+            fetchLogs.push({ url, method, latencyMs: Date.now() - t0, error: String(e) });
+            throw e;
         }
+    };
+
+    try {
+        // ① Auth 配置（trailing slash 修复后的值）
+        diag.FRONTEND_URL = process.env.FRONTEND_URL ?? '(unset)';
+        diag.BACKEND_URL = process.env.BACKEND_URL ?? '(unset)';
+        diag.BETTER_AUTH_URL = process.env.BETTER_AUTH_URL ?? '(unset)';
+
+        // ② 模拟真实 auth.handler（使用去尾斜杠的 URL），带 20s 超时
+        {
+            const fUrl = (process.env.FRONTEND_URL || 'https://naotu.vercel.app').replace(/\/+$/, '');
+            const bUrl = (process.env.BETTER_AUTH_URL || 'https://backend-nu-green-24kw0kc9o9.vercel.app').replace(/\/+$/, '');
+            diag.simulatedOrigin = fUrl;
+            diag.simulatedBaseUrl = bUrl;
+            diag.simulatedCallbackURL = `${fUrl}/dashboard`;
+
+            const t0 = Date.now();
+            try {
+                const fakeReq = new Request(`${bUrl}/auth/sign-in/social`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Origin': fUrl,
+                    },
+                    body: JSON.stringify({
+                        provider: 'google',
+                        callbackURL: `${fUrl}/dashboard`,
+                    }),
+                });
+                const response = await Promise.race([
+                    auth.handler(fakeReq),
+                    new Promise<never>((_, rej) =>
+                        setTimeout(() => rej(new Error('AUTH_HANDLER_TIMEOUT_20S')), 20_000)
+                    ),
+                ]);
+                const respBody = await response.text().catch((e: unknown) => String(e));
+                diag.authHandler = {
+                    status: response.status,
+                    latencyMs: Date.now() - t0,
+                    body: respBody.slice(0, 800),
+                };
+            } catch (e) {
+                diag.authHandler = { error: String(e), latencyMs: Date.now() - t0 };
+            }
+        }
+    } finally {
+        // 恢复原始 fetch
+        globalThis.fetch = originalFetch;
     }
 
-    // ③ 测试 db.transaction() — Neon HTTP 不支持交互式事务，可能 hang！
-    {
-        const t0 = Date.now();
-        try {
-            const result = await Promise.race([
-                db.transaction(async (tx: typeof db) => {
-                    return tx.execute(sql`SELECT 1 as tx_ok`);
-                }),
-                new Promise<never>((_, rej) =>
-                    setTimeout(() => rej(new Error('TRANSACTION_TIMEOUT_5S')), 5_000)
-                ),
-            ]);
-            diag.transaction = { ok: true, latencyMs: Date.now() - t0, result };
-        } catch (e) {
-            diag.transaction = { error: String(e), latencyMs: Date.now() - t0 };
-        }
-    }
-
-    // ④ Google OIDC 发现端点
-    {
-        const t0 = Date.now();
-        try {
-            const resp = await Promise.race([
-                fetch('https://accounts.google.com/.well-known/openid-configuration'),
-                new Promise<never>((_, rej) =>
-                    setTimeout(() => rej(new Error('GOOGLE_OIDC_TIMEOUT_8S')), 8_000)
-                ),
-            ]);
-            diag.googleOidc = { status: resp.status, latencyMs: Date.now() - t0 };
-        } catch (e) {
-            diag.googleOidc = { error: String(e), latencyMs: Date.now() - t0 };
-        }
-    }
-
-    // ⑤ 模拟真实 auth.handler（使用正确的 callbackURL + Origin）
-    {
-        const frontendUrl = (process.env.FRONTEND_URL || 'https://naotu.vercel.app').replace(/\/$/, '');
-        const backendUrl = (process.env.BETTER_AUTH_URL || 'https://backend-nu-green-24kw0kc9o9.vercel.app').replace(/\/$/, '');
-        const t0 = Date.now();
-        try {
-            const fakeReq = new Request(`${backendUrl}/auth/sign-in/social`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Origin': frontendUrl,
-                },
-                body: JSON.stringify({
-                    provider: 'google',
-                    callbackURL: `${frontendUrl}/dashboard`,
-                }),
-            });
-            const response = await Promise.race([
-                auth.handler(fakeReq),
-                new Promise<never>((_, rej) =>
-                    setTimeout(() => rej(new Error('AUTH_HANDLER_TIMEOUT_20S')), 20_000)
-                ),
-            ]);
-            const respBody = await response.text().catch((e: unknown) => String(e));
-            diag.authHandler = {
-                status: response.status,
-                latencyMs: Date.now() - t0,
-                body: respBody.slice(0, 500),
-            };
-        } catch (e) {
-            diag.authHandler = { error: String(e), latencyMs: Date.now() - t0 };
-        }
-    }
-
+    diag.fetchLogs = fetchLogs;
     return c.json(diag);
 });
 

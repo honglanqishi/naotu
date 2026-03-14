@@ -19,7 +19,7 @@ const configuredBetterAuthUrl = process.env.BETTER_AUTH_URL;
 
 const resolvedBetterAuthUrl = strip((() => {
     if (isProduction) {
-        return configuredBetterAuthUrl || backendUrl;
+        return frontendUrl;
     }
 
     // 开发环境：优先使用显式 BETTER_AUTH_URL；
@@ -35,20 +35,11 @@ const trustedOrigins = Array.from(new Set([
     `http://127.0.0.1:${backendPort}`,
 ]));
 
-const allowedAuthHosts = Array.from(new Set([
-    new URL(frontendUrl).host,
-    new URL(resolvedBetterAuthUrl).host,
-    new URL(backendUrl).host,
-    `127.0.0.1:${frontendPort}`,
-    `127.0.0.1:${backendPort}`,
-]));
-
 console.log('[auth] config:', {
     frontendUrl,
     backendUrl,
     resolvedBetterAuthUrl,
     trustedOrigins,
-    allowedAuthHosts,
 });
 
 export const auth = betterAuth({
@@ -78,14 +69,8 @@ export const auth = betterAuth({
     },
 
     // 基础 URL
-    // 生产环境必须按请求 host 动态解析：
-    // - Web 端走前端同域代理时，redirect_uri 必须是 naotu.vercel.app/auth/callback/google
-    // - 桌面端/后端直连时，redirect_uri 仍需保持 backend 域名
-    baseURL: {
-        allowedHosts: allowedAuthHosts,
-        fallback: frontendUrl,
-        protocol: isProduction ? 'https' : 'auto',
-    },
+    // 生产环境优先固定为前端域名，确保 Web OAuth 的 state cookie 与 callback 域一致。
+    baseURL: resolvedBetterAuthUrl,
     basePath: '/auth',
 
     // Session 配置
@@ -100,10 +85,6 @@ export const auth = betterAuth({
 
     // 安全配置
     secret: process.env.BETTER_AUTH_SECRET!,
-
-    advanced: {
-        trustedProxyHeaders: true,
-    },
 
     // 信任的域名（允许这些来源的请求携带 session cookie）
     trustedOrigins,

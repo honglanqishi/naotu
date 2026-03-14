@@ -4,11 +4,12 @@ const nextConfig: NextConfig = {
     output: 'standalone',  // Docker 部署优化
 
     // API 请求代理
-    // 使用服务端专用变量 BACKEND_INTERNAL_URL（不暴露给浏览器）
-    // 生产环境：Nginx 直接路由 /api/ 和 /auth/ 到 backend，这里的 rewrite 不会生效
     // 本地开发：Next.js dev server 代理到 localhost:3001，避免跨域导致 cookie 失效
+    // Vercel 生产：BACKEND_INTERNAL_URL 必须设置为后端 Vercel URL，
+    //              否则回退到 localhost:3001（Vercel 上不存在，会 hang 30s 超时）
     async rewrites() {
         const backendUrl = process.env.BACKEND_INTERNAL_URL || 'http://localhost:3001';
+        console.log(`[next.config] rewrites destination: ${backendUrl}`);
         return [
             {
                 source: '/api/:path*',

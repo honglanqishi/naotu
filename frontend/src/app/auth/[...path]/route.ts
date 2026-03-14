@@ -30,13 +30,42 @@ function buildForwardHeaders(req: NextRequest) {
 async function proxy(req: NextRequest) {
     const path = req.nextUrl.pathname; // e.g. /auth/sign-in/social
     const search = req.nextUrl.search; // e.g. ?foo=bar
-    const target = `${BACKEND_URL}${path}${search}`;
+    let target = `${BACKEND_URL}${path}${search}`;
 
     const headers = buildForwardHeaders(req);
 
-    const body = req.method !== 'GET' && req.method !== 'HEAD'
+    let body = req.method !== 'GET' && req.method !== 'HEAD'
         ? await req.arrayBuffer()
         : undefined;
+
+    if (req.method === 'POST' && path === '/auth/sign-in/social') {
+        const text = body ? new TextDecoder().decode(body) : '{}';
+        let parsed: {
+            provider?: string;
+            callbackURL?: string;
+            errorCallbackURL?: string;
+            newUserCallbackURL?: string;
+        } = {};
+
+        try {
+            parsed = JSON.parse(text);
+        } catch {
+            return NextResponse.json(
+                { error: 'Invalid social sign-in payload' },
+                { status: 400 }
+            );
+        }
+
+        const qs = new URLSearchParams();
+        if (parsed.provider) qs.set('provider', parsed.provider);
+        if (parsed.callbackURL) qs.set('callbackURL', parsed.callbackURL);
+        if (parsed.errorCallbackURL) qs.set('errorCallbackURL', parsed.errorCallbackURL);
+        if (parsed.newUserCallbackURL) qs.set('newUserCallbackURL', parsed.newUserCallbackURL);
+
+        target = `${BACKEND_URL}/auth/sign-in/social-direct?${qs.toString()}`;
+        body = undefined;
+        headers.delete('content-type');
+    }
 
     try {
         const resp = await fetch(target, {

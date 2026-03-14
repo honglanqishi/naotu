@@ -48,6 +48,21 @@ const socialSignInSchema = z.object({
     additionalData: z.record(z.string(), z.unknown()).optional(),
 });
 
+function getSocialSignInHeaders(headers: Headers) {
+    const forwarded = new Headers();
+    const origin = headers.get('origin');
+    const referer = headers.get('referer');
+    const cookie = headers.get('cookie');
+    const userAgent = headers.get('user-agent');
+
+    if (origin) forwarded.set('origin', origin);
+    if (referer) forwarded.set('referer', referer);
+    if (cookie) forwarded.set('cookie', cookie);
+    if (userAgent) forwarded.set('user-agent', userAgent);
+
+    return forwarded;
+}
+
 authRoutes.post('/desktop/init', async (c) => {
     const body = await c.req.json().catch(() => null);
     const parsed = desktopInitSchema.safeParse(body);
@@ -164,6 +179,41 @@ authRoutes.post('/desktop/consume', async (c) => {
         return c.json({ sessionToken: result.sessionToken });
     } catch (error) {
         return c.json({ error: (error as Error).message }, 400);
+    }
+});
+
+authRoutes.get('/sign-in/social-direct', async (c) => {
+    const start = Date.now();
+    const provider = c.req.query('provider') ?? '';
+    const callbackURL = c.req.query('callbackURL') ?? undefined;
+    const errorCallbackURL = c.req.query('errorCallbackURL') ?? undefined;
+    const newUserCallbackURL = c.req.query('newUserCallbackURL') ?? undefined;
+
+    const parsed = socialSignInSchema.safeParse({
+        provider,
+        callbackURL,
+        errorCallbackURL,
+        newUserCallbackURL,
+    });
+    if (!parsed.success) {
+        return c.json({ error: 'Invalid query', issues: parsed.error.flatten() }, 400);
+    }
+
+    try {
+        const result = await Promise.race([
+            auth.api.signInSocial({
+                headers: getSocialSignInHeaders(c.req.raw.headers),
+                body: parsed.data,
+            }),
+            new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('SIGN_IN_SOCIAL_DIRECT_TIMEOUT_12S')), 12_000);
+            }),
+        ]);
+        console.log(`[auth] GET /auth/sign-in/social-direct — done in ${Date.now() - start}ms`);
+        return c.json(result);
+    } catch (error) {
+        console.error(`[auth] GET /auth/sign-in/social-direct — ERROR after ${Date.now() - start}ms:`, error);
+        return c.json({ error: 'Social sign-in direct failed', message: String(error) }, 500);
     }
 });
 

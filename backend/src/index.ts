@@ -7,6 +7,7 @@ import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { sql } from 'drizzle-orm';
 import { db } from './db/client.js';
+import { auth } from './lib/auth.js';
 import { authRoutes } from './routes/auth.js';
 import { mapsRoutes } from './routes/maps.js';
 import { tagsRoutes } from './routes/tags.js';
@@ -151,6 +152,71 @@ app.get('/health/db', async (c) => {
     const allOk = diag.rawFetch && (diag.rawFetch as Record<string, unknown>).status === 200
         && diag.drizzle && (diag.drizzle as Record<string, unknown>).ok === true;
     return c.json({ status: allOk ? 'ok' : 'error', ...diag }, allOk ? 200 : 500);
+});
+
+// ── 排除法第二轮：auth.handler 精准诊断 ──────────────────
+app.get('/health/auth', async (c) => {
+    const diag: Record<string, unknown> = {};
+
+    // ① Auth 环境变量（判断 baseURL 是否正确）
+    diag.FRONTEND_URL = process.env.FRONTEND_URL ?? '(unset)';
+    diag.BACKEND_URL = process.env.BACKEND_URL ?? '(unset)';
+    diag.BETTER_AUTH_URL = process.env.BETTER_AUTH_URL ?? '(unset)';
+    diag.hasGoogleClientId = !!process.env.GOOGLE_CLIENT_ID;
+    diag.hasGoogleClientSecret = !!process.env.GOOGLE_CLIENT_SECRET;
+    diag.hasBetterAuthSecret = !!process.env.BETTER_AUTH_SECRET;
+
+    // ② Google OIDC 发现端点连通性（better-auth 内部可能 fetch 这个）
+    {
+        const t0 = Date.now();
+        try {
+            const resp = await Promise.race([
+                fetch('https://accounts.google.com/.well-known/openid-configuration'),
+                new Promise<never>((_, rej) =>
+                    setTimeout(() => rej(new Error('GOOGLE_OIDC_TIMEOUT_8S')), 8_000)
+                ),
+            ]);
+            const body = await resp.text().catch((e: unknown) => String(e));
+            diag.googleOidc = {
+                status: resp.status,
+                latencyMs: Date.now() - t0,
+                body: body.slice(0, 200),
+            };
+        } catch (e) {
+            diag.googleOidc = { error: String(e), latencyMs: Date.now() - t0 };
+        }
+    }
+
+    // ③ 模拟 auth.handler 处理 /auth/sign-in/social（带 15s 超时）
+    {
+        const t0 = Date.now();
+        try {
+            const fakeReq = new Request('https://backend-nu-green-24kw0kc9o9.vercel.app/auth/sign-in/social', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider: 'google',
+                    callbackURL: 'https://example.com/callback',
+                }),
+            });
+            const response = await Promise.race([
+                auth.handler(fakeReq),
+                new Promise<never>((_, rej) =>
+                    setTimeout(() => rej(new Error('AUTH_HANDLER_TIMEOUT_15S')), 15_000)
+                ),
+            ]);
+            const respBody = await response.text().catch((e: unknown) => String(e));
+            diag.authHandler = {
+                status: response.status,
+                latencyMs: Date.now() - t0,
+                body: respBody.slice(0, 500),
+            };
+        } catch (e) {
+            diag.authHandler = { error: String(e), latencyMs: Date.now() - t0 };
+        }
+    }
+
+    return c.json(diag);
 });
 
 // =============================================

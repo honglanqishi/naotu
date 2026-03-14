@@ -69,15 +69,29 @@ function getSocialSignInHeaders(headers: Headers) {
     return forwarded;
 }
 
-function jsonResponseWithHeaders(payload: unknown, headers: Headers, status = 200) {
-    const responseHeaders = new Headers(headers);
-    if (!responseHeaders.has('content-type')) {
-        responseHeaders.set('content-type', 'application/json');
+function resolveRequestOrigin(requestUrl: string, headers: Headers) {
+    const forwardedHost = headers.get('x-forwarded-host');
+    const forwardedProto = headers.get('x-forwarded-proto');
+
+    if (forwardedHost && forwardedProto) {
+        return `${forwardedProto}://${forwardedHost}`;
     }
-    return new Response(JSON.stringify(payload), {
-        status,
-        headers: responseHeaders,
+
+    return new URL(requestUrl).origin;
+}
+
+async function runSocialSignInViaHandler(requestUrl: string, sourceHeaders: Headers, payload: z.infer<typeof socialSignInSchema>) {
+    const origin = resolveRequestOrigin(requestUrl, sourceHeaders);
+    const headers = getSocialSignInHeaders(sourceHeaders);
+    headers.set('content-type', 'application/json');
+
+    const syntheticRequest = new Request(`${origin}/auth/sign-in/social`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
     });
+
+    return auth.handler(syntheticRequest);
 }
 
 authRoutes.post('/desktop/init', async (c) => {
@@ -218,18 +232,13 @@ authRoutes.get('/sign-in/social-direct', async (c) => {
 
     try {
         const result = await Promise.race([
-            auth.api.signInSocial({
-                headers: getSocialSignInHeaders(c.req.raw.headers),
-                body: parsed.data,
-                returnHeaders: true,
-                returnStatus: true,
-            }),
+            runSocialSignInViaHandler(c.req.url, c.req.raw.headers, parsed.data),
             new Promise<never>((_, reject) => {
                 setTimeout(() => reject(new Error('SIGN_IN_SOCIAL_DIRECT_TIMEOUT_12S')), 12_000);
             }),
         ]);
         console.log(`[auth] GET /auth/sign-in/social-direct — done in ${Date.now() - start}ms`);
-        return jsonResponseWithHeaders(result.response, result.headers, result.status);
+        return result;
     } catch (error) {
         console.error(`[auth] GET /auth/sign-in/social-direct — ERROR after ${Date.now() - start}ms:`, error);
         return c.json({ error: 'Social sign-in direct failed', message: String(error) }, 500);
@@ -246,18 +255,13 @@ authRoutes.post('/sign-in/social', async (c) => {
 
     try {
         const result = await Promise.race([
-            auth.api.signInSocial({
-                headers: c.req.raw.headers,
-                body: parsed.data,
-                returnHeaders: true,
-                returnStatus: true,
-            }),
+            runSocialSignInViaHandler(c.req.url, c.req.raw.headers, parsed.data),
             new Promise<never>((_, reject) => {
                 setTimeout(() => reject(new Error('SIGN_IN_SOCIAL_TIMEOUT_12S')), 12_000);
             }),
         ]);
         console.log(`[auth] POST /auth/sign-in/social — api.done in ${Date.now() - start}ms`);
-        return jsonResponseWithHeaders(result.response, result.headers, result.status);
+        return result;
     } catch (error) {
         console.error(`[auth] POST /auth/sign-in/social — api.ERROR after ${Date.now() - start}ms:`, error);
         return c.json({ error: 'Social sign-in failed', message: String(error) }, 500);

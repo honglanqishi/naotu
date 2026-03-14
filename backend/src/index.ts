@@ -154,11 +154,11 @@ app.get('/health/db', async (c) => {
     return c.json({ status: allOk ? 'ok' : 'error', ...diag }, allOk ? 200 : 500);
 });
 
-// ── 排除法第二轮：auth.handler 精准诊断 ──────────────────
+// ── 排除法第三轮：精准模拟真实请求 + 事务测试 ──────────
 app.get('/health/auth', async (c) => {
     const diag: Record<string, unknown> = {};
 
-    // ① Auth 环境变量（判断 baseURL 是否正确）
+    // ① Auth 环境变量
     diag.FRONTEND_URL = process.env.FRONTEND_URL ?? '(unset)';
     diag.BACKEND_URL = process.env.BACKEND_URL ?? '(unset)';
     diag.BETTER_AUTH_URL = process.env.BETTER_AUTH_URL ?? '(unset)';
@@ -166,7 +166,46 @@ app.get('/health/auth', async (c) => {
     diag.hasGoogleClientSecret = !!process.env.GOOGLE_CLIENT_SECRET;
     diag.hasBetterAuthSecret = !!process.env.BETTER_AUTH_SECRET;
 
-    // ② Google OIDC 发现端点连通性（better-auth 内部可能 fetch 这个）
+    // ② 测试 INSERT 到 verifications 表（better-auth 写 state 就是这样做的）
+    {
+        const t0 = Date.now();
+        try {
+            const result = await Promise.race([
+                db.execute(sql`
+                    INSERT INTO verifications (id, identifier, value, expires_at, created_at, updated_at)
+                    VALUES ('_diag_test_' || gen_random_uuid()::text, '_diag', 'test', NOW() + INTERVAL '1 minute', NOW(), NOW())
+                `),
+                new Promise<never>((_, rej) =>
+                    setTimeout(() => rej(new Error('INSERT_TIMEOUT_8S')), 8_000)
+                ),
+            ]);
+            // 清理测试数据
+            await db.execute(sql`DELETE FROM verifications WHERE identifier = '_diag'`).catch(() => {});
+            diag.insertVerification = { ok: true, latencyMs: Date.now() - t0 };
+        } catch (e) {
+            diag.insertVerification = { error: String(e), latencyMs: Date.now() - t0 };
+        }
+    }
+
+    // ③ 测试 db.transaction() — Neon HTTP 不支持交互式事务，可能 hang！
+    {
+        const t0 = Date.now();
+        try {
+            const result = await Promise.race([
+                db.transaction(async (tx: typeof db) => {
+                    return tx.execute(sql`SELECT 1 as tx_ok`);
+                }),
+                new Promise<never>((_, rej) =>
+                    setTimeout(() => rej(new Error('TRANSACTION_TIMEOUT_5S')), 5_000)
+                ),
+            ]);
+            diag.transaction = { ok: true, latencyMs: Date.now() - t0, result };
+        } catch (e) {
+            diag.transaction = { error: String(e), latencyMs: Date.now() - t0 };
+        }
+    }
+
+    // ④ Google OIDC 发现端点
     {
         const t0 = Date.now();
         try {
@@ -176,33 +215,33 @@ app.get('/health/auth', async (c) => {
                     setTimeout(() => rej(new Error('GOOGLE_OIDC_TIMEOUT_8S')), 8_000)
                 ),
             ]);
-            const body = await resp.text().catch((e: unknown) => String(e));
-            diag.googleOidc = {
-                status: resp.status,
-                latencyMs: Date.now() - t0,
-                body: body.slice(0, 200),
-            };
+            diag.googleOidc = { status: resp.status, latencyMs: Date.now() - t0 };
         } catch (e) {
             diag.googleOidc = { error: String(e), latencyMs: Date.now() - t0 };
         }
     }
 
-    // ③ 模拟 auth.handler 处理 /auth/sign-in/social（带 15s 超时）
+    // ⑤ 模拟真实 auth.handler（使用正确的 callbackURL + Origin）
     {
+        const frontendUrl = (process.env.FRONTEND_URL || 'https://naotu.vercel.app').replace(/\/$/, '');
+        const backendUrl = (process.env.BETTER_AUTH_URL || 'https://backend-nu-green-24kw0kc9o9.vercel.app').replace(/\/$/, '');
         const t0 = Date.now();
         try {
-            const fakeReq = new Request('https://backend-nu-green-24kw0kc9o9.vercel.app/auth/sign-in/social', {
+            const fakeReq = new Request(`${backendUrl}/auth/sign-in/social`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Origin': frontendUrl,
+                },
                 body: JSON.stringify({
                     provider: 'google',
-                    callbackURL: 'https://example.com/callback',
+                    callbackURL: `${frontendUrl}/dashboard`,
                 }),
             });
             const response = await Promise.race([
                 auth.handler(fakeReq),
                 new Promise<never>((_, rej) =>
-                    setTimeout(() => rej(new Error('AUTH_HANDLER_TIMEOUT_15S')), 15_000)
+                    setTimeout(() => rej(new Error('AUTH_HANDLER_TIMEOUT_20S')), 20_000)
                 ),
             ]);
             const respBody = await response.text().catch((e: unknown) => String(e));

@@ -4,30 +4,35 @@ const BACKEND_URL = (
     process.env.BACKEND_INTERNAL_URL || 'http://localhost:3001'
 ).replace(/\/+$/, '');
 
-// 不转发的请求头（由 Next.js/Vercel 自动管理）
-const HOP_BY_HOP = new Set([
-    'connection',
-    'keep-alive',
-    'transfer-encoding',
-    'te',
-    'trailer',
-    'upgrade',
-    'host',
-    'content-length', // fetch 会自动设置
-]);
+const FORWARDED_HEADERS = [
+    'accept',
+    'accept-language',
+    'content-type',
+    'cookie',
+    'origin',
+    'referer',
+    'user-agent',
+] as const;
+
+function buildForwardHeaders(req: NextRequest) {
+    const headers = new Headers();
+    for (const name of FORWARDED_HEADERS) {
+        const value = req.headers.get(name);
+        if (value) {
+            headers.set(name, value);
+        }
+    }
+    headers.set('x-forwarded-host', req.headers.get('host') || req.nextUrl.host);
+    headers.set('x-forwarded-proto', req.nextUrl.protocol.replace(':', ''));
+    return headers;
+}
 
 async function proxy(req: NextRequest) {
     const path = req.nextUrl.pathname; // e.g. /auth/sign-in/social
     const search = req.nextUrl.search; // e.g. ?foo=bar
     const target = `${BACKEND_URL}${path}${search}`;
 
-    // 构建转发头
-    const headers = new Headers();
-    req.headers.forEach((value, key) => {
-        if (!HOP_BY_HOP.has(key.toLowerCase())) {
-            headers.set(key, value);
-        }
-    });
+    const headers = buildForwardHeaders(req);
 
     const body = req.method !== 'GET' && req.method !== 'HEAD'
         ? await req.arrayBuffer()
@@ -39,13 +44,13 @@ async function proxy(req: NextRequest) {
             headers,
             body,
             redirect: 'manual', // 不自动跟随重定向，原样返回给浏览器
+            signal: AbortSignal.timeout(10_000),
         });
 
         // 构建响应
         const respHeaders = new Headers();
         resp.headers.forEach((value, key) => {
-            // 转发所有响应头（包括 Set-Cookie）
-            if (!HOP_BY_HOP.has(key.toLowerCase())) {
+            if (key.toLowerCase() !== 'content-length') {
                 respHeaders.append(key, value);
             }
         });
@@ -59,7 +64,11 @@ async function proxy(req: NextRequest) {
     } catch (error) {
         console.error(`[auth-proxy] ${req.method} ${target} — ERROR:`, error);
         return NextResponse.json(
-            { error: 'Backend proxy error', message: String(error) },
+            {
+                error: 'Backend proxy error',
+                target,
+                message: String(error),
+            },
             { status: 502 }
         );
     }

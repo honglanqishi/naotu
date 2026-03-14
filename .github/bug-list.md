@@ -17,6 +17,7 @@
 | 数据库 schema 两套不同步 | Docker 路径隔离，不能 import 跨包 | `backend/src/db/schema.ts` 与 `database/src/schema.ts` 手动同步 |
 | CORS 请求被拒绝 | 误用 `BETTER_AUTH_URL` 作为 CORS origin | CORS origin 只能用 `FRONTEND_URL` |
 | bootstrap.ts 代理不生效 | 没有在第一行导入 | `backend/src/index.ts` 第二行必须是 `import './bootstrap.js'` |
+| Vercel 生产环境点击 Google 登录一直 pending，浏览器 `/auth/sign-in/social` 最终 504 | 前端把 `/auth/*` 通过 Next.js rewrite 或宽松代理转发到后端时，Vercel Serverless 会在代理层超时；同时 `*.vercel.app` 子域之间不能靠直连 `NEXT_PUBLIC_API_URL` 共享前端所需 cookie | 生产环境必须保持浏览器同域请求 `/auth/*`，由 `frontend/src/app/auth/[...path]/route.ts` 和 `frontend/src/app/api/[...path]/route.ts` 显式代理到 `BACKEND_INTERNAL_URL`；代理只转发必要头，并给后端 fetch 加显式超时，禁止再依赖 `next.config.ts` rewrites 处理生产鉴权流 |
 
 | 富文本工具栏按钮无激活态 | 未监听 `selectionchange` + 未调用 `queryCommandState` | 在 RichTextToolbar 中用 `selectionchange` 事件更新 `activeFormats` 状态，按钮 style 通过 `getBtnStyle(format)` 区分激活/未激活样式 |
 | 右键子菜单移入时消失 | 鼠标从 MenuItem 移到 fixed 子菜单时触发了 mouseleave 计时器 | 将 `clearCloseTimer`/`startCloseTimer` 作为 `onMouseEnter`/`onMouseLeave` 传入 SubMenu，鼠标进入 SubMenu 即取消计时 |

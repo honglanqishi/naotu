@@ -54,11 +54,17 @@ function getSocialSignInHeaders(headers: Headers) {
     const referer = headers.get('referer');
     const cookie = headers.get('cookie');
     const userAgent = headers.get('user-agent');
+    const host = headers.get('host');
+    const forwardedHost = headers.get('x-forwarded-host');
+    const forwardedProto = headers.get('x-forwarded-proto');
 
     if (origin) forwarded.set('origin', origin);
     if (referer) forwarded.set('referer', referer);
     if (cookie) forwarded.set('cookie', cookie);
     if (userAgent) forwarded.set('user-agent', userAgent);
+    if (host) forwarded.set('host', host);
+    if (forwardedHost) forwarded.set('x-forwarded-host', forwardedHost);
+    if (forwardedProto) forwarded.set('x-forwarded-proto', forwardedProto);
 
     return forwarded;
 }

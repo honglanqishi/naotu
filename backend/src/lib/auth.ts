@@ -35,7 +35,21 @@ const trustedOrigins = Array.from(new Set([
     `http://127.0.0.1:${backendPort}`,
 ]));
 
-console.log('[auth] config:', { frontendUrl, backendUrl, resolvedBetterAuthUrl, trustedOrigins });
+const allowedAuthHosts = Array.from(new Set([
+    new URL(frontendUrl).host,
+    new URL(resolvedBetterAuthUrl).host,
+    new URL(backendUrl).host,
+    `127.0.0.1:${frontendPort}`,
+    `127.0.0.1:${backendPort}`,
+]));
+
+console.log('[auth] config:', {
+    frontendUrl,
+    backendUrl,
+    resolvedBetterAuthUrl,
+    trustedOrigins,
+    allowedAuthHosts,
+});
 
 export const auth = betterAuth({
     database: drizzleAdapter(db, {
@@ -64,7 +78,14 @@ export const auth = betterAuth({
     },
 
     // 基础 URL
-    baseURL: resolvedBetterAuthUrl,
+    // 生产环境必须按请求 host 动态解析：
+    // - Web 端走前端同域代理时，redirect_uri 必须是 naotu.vercel.app/auth/callback/google
+    // - 桌面端/后端直连时，redirect_uri 仍需保持 backend 域名
+    baseURL: {
+        allowedHosts: allowedAuthHosts,
+        fallback: frontendUrl,
+        protocol: isProduction ? 'https' : 'auto',
+    },
     basePath: '/auth',
 
     // Session 配置
@@ -80,6 +101,10 @@ export const auth = betterAuth({
     // 安全配置
     secret: process.env.BETTER_AUTH_SECRET!,
 
+    advanced: {
+        trustedProxyHeaders: true,
+    },
+
     // 信任的域名（允许这些来源的请求携带 session cookie）
     trustedOrigins,
 });
@@ -87,87 +112,3 @@ export const auth = betterAuth({
 export type Auth = typeof auth;
 
 
-class MyPromise {
-
-    state: 'pending' | 'fulfilled' | 'rejected'
-    value: any
-    reason: any
-    onFulfilledCallbacks: Function[]
-    onRejectedCallbacks: Function[]
-  constructor(executor: (resolve: (value: any) => void, reject: (reason: any) => void) => void) {
-    this.state = 'pending'
-    this.value = undefined
-    this.reason = undefined
-    this.onFulfilledCallbacks = []   // 存 .then 的成功回调
-    this.onRejectedCallbacks  = []   // 存 .then 的失败回调
-
-    const resolve = (value: any) => {
-      if (this.state !== 'pending') return
-      this.state = 'fulfilled'
-      this.value = value
-      // 依次执行所有成功回调
-      this.onFulfilledCallbacks.forEach(fn => fn(value))
-    }
-
-    const reject = (reason: any) => {
-      if (this.state !== 'pending') return
-      this.state = 'rejected'
-      this.reason = reason
-      this.onRejectedCallbacks.forEach(fn => fn(reason))
-    }
-
-    // 立即执行 executor，并传入我们自己定义的 resolve/reject
-    try {
-      executor(resolve, reject)
-    } catch (err) {
-      reject(err)
-    }
-  }
-
-  then(onFulfilled: (value: any) => any, onRejected?: (reason: any) => any): MyPromise {
-    // 返回一个新的 Promise（链式调用核心）
-    return new MyPromise((resolve, reject) => {
-      // 处理 fulfilled 情况
-      if (this.state === 'fulfilled') {
-        setTimeout(() => {  // 模拟微任务（then 回调是微任务）
-          try {
-            const x = onFulfilled(this.value)
-            resolve(x)           // 关键：把上一个 then 的返回值传下去
-          } catch (e) {
-            reject(e)
-          }
-        }, 0)
-      }
-      // 处理 rejected 情况（类似上面）
-      else if (this.state === 'rejected') {
-        setTimeout(() => {
-          try {
-            const x = onRejected ? onRejected(this.reason) : this.reason
-            resolve(x)   // 注意：rejected 也可以被 then 的第二个参数处理后变成 resolve
-          } catch (e) {
-            reject(e)
-          }
-        }, 0)
-      }
-      // pending 状态：先收集回调，等状态改变后再执行
-      else {
-        this.onFulfilledCallbacks.push((value: any) => {
-          setTimeout(() => {
-            try {
-              const x = onFulfilled(value)
-              resolve(x)
-            } catch (e) { reject(e) }
-          }, 0)
-        })
-        this.onRejectedCallbacks.push((reason: any) => {
-          setTimeout(() => {
-            try {
-              const x = onRejected ? onRejected(reason) : reason
-              resolve(x)
-            } catch (e) { reject(e) }
-          }, 0)
-        })
-      }
-    })
-  }
-}

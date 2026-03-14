@@ -31,6 +31,7 @@ async function proxy(req: NextRequest) {
     const path = req.nextUrl.pathname; // e.g. /auth/sign-in/social
     const search = req.nextUrl.search; // e.g. ?foo=bar
     let target = `${BACKEND_URL}${path}${search}`;
+    let method = req.method;
 
     const headers = buildForwardHeaders(req);
 
@@ -63,13 +64,14 @@ async function proxy(req: NextRequest) {
         if (parsed.newUserCallbackURL) qs.set('newUserCallbackURL', parsed.newUserCallbackURL);
 
         target = `${BACKEND_URL}/auth/sign-in/social-direct?${qs.toString()}`;
+        method = 'GET';
         body = undefined;
         headers.delete('content-type');
     }
 
     try {
         const resp = await fetch(target, {
-            method: req.method,
+            method,
             headers,
             body,
             redirect: 'manual', // 不自动跟随重定向，原样返回给浏览器

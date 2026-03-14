@@ -96,12 +96,17 @@ async function proxy(req: NextRequest) {
         if (req.method === 'POST' && path === '/auth/sign-in/social') {
             const data = await resp.json().catch(() => null) as { url?: string; redirect?: boolean } | null;
             if (data?.url) {
-                const googleUrl = new URL(data.url);
-                googleUrl.searchParams.set('redirect_uri', `${frontendOrigin}/auth/callback/google`);
+                const redirectUri = `${frontendOrigin}/auth/callback/google`;
+                const rewrittenUrl = data.url.replace(
+                    /redirect_uri=[^&]+/,
+                    `redirect_uri=${encodeURIComponent(redirectUri)}`,
+                );
+                respHeaders.set('x-auth-proxy-bridge', '2');
                 return NextResponse.json(
                     {
                         ...data,
-                        url: googleUrl.toString(),
+                        url: rewrittenUrl,
+                        bridgeVersion: 2,
                     },
                     {
                         status: resp.status,

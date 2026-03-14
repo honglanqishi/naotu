@@ -592,3 +592,4 @@ cd D:\naotu\frontend ; npx tsc --noEmit 2>&1 | Select-Object -First 40
 > 最后更新：2026-03-09 | 修复登录成功后列表 401 的最终根因：`frontend/api.ts` 在 `NEXT_PUBLIC_API_URL=''` 时被 `||` 回退到 3001，导致 `/auth` 与 `/api` 分叉；改为 `?? ''` 统一同源 rewrite
 > 最后更新：2026-03-09 | 修复桌面 OAuth 后接口仍 401：`/auth/desktop/grant` 不再用 `session.session.token`，改为从浏览器 `cookie` 头提取 `better-auth.session_token` 回传 Electron 注入
 > 最后更新：2026-03-14 | 修复 Vercel 生产环境 Google 登录 `/auth/sign-in/social` 持续 pending/504：生产不再依赖 `next.config.ts` rewrites 代理鉴权，而改用 `frontend/src/app/auth/[...path]/route.ts` 与 `frontend/src/app/api/[...path]/route.ts` 显式代理到 `BACKEND_INTERNAL_URL`，仅转发必要头并为后端 fetch 设置显式超时；`NEXT_PUBLIC_API_URL` 不作为该场景主方案（`*.vercel.app` 间无法满足前端同域 cookie 需求）
+> 最后更新：2026-03-14 | 修复 Vercel 生产环境后端 `auth.handler(c.req.raw)` 对 `/auth/sign-in/social` 仍挂起：在 `backend/src/routes/auth.ts` 单独改为 `auth.api.signInSocial({ headers, body })`，绕过 Node 请求适配链路兼容性问题，其余 `/auth/*` 继续保留原 handler

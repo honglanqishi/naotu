@@ -36,6 +36,18 @@ const desktopConsumeSchema = z.object({
     grant: z.string().min(16).max(128),
 });
 
+const socialSignInSchema = z.object({
+    provider: z.string().min(1),
+    callbackURL: z.string().optional(),
+    errorCallbackURL: z.string().optional(),
+    newUserCallbackURL: z.string().optional(),
+    disableRedirect: z.boolean().optional(),
+    loginHint: z.string().optional(),
+    requestSignUp: z.boolean().optional(),
+    scopes: z.array(z.string()).optional(),
+    additionalData: z.record(z.string(), z.unknown()).optional(),
+});
+
 authRoutes.post('/desktop/init', async (c) => {
     const body = await c.req.json().catch(() => null);
     const parsed = desktopInitSchema.safeParse(body);
@@ -152,6 +164,32 @@ authRoutes.post('/desktop/consume', async (c) => {
         return c.json({ sessionToken: result.sessionToken });
     } catch (error) {
         return c.json({ error: (error as Error).message }, 400);
+    }
+});
+
+authRoutes.post('/sign-in/social', async (c) => {
+    const start = Date.now();
+    const body = await c.req.json().catch(() => null);
+    const parsed = socialSignInSchema.safeParse(body);
+    if (!parsed.success) {
+        return c.json({ error: 'Invalid payload', issues: parsed.error.flatten() }, 400);
+    }
+
+    try {
+        const result = await Promise.race([
+            auth.api.signInSocial({
+                headers: c.req.raw.headers,
+                body: parsed.data,
+            }),
+            new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('SIGN_IN_SOCIAL_TIMEOUT_12S')), 12_000);
+            }),
+        ]);
+        console.log(`[auth] POST /auth/sign-in/social — api.done in ${Date.now() - start}ms`);
+        return c.json(result);
+    } catch (error) {
+        console.error(`[auth] POST /auth/sign-in/social — api.ERROR after ${Date.now() - start}ms:`, error);
+        return c.json({ error: 'Social sign-in failed', message: String(error) }, 500);
     }
 });
 

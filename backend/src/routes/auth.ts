@@ -94,6 +94,16 @@ async function runSocialSignInViaHandler(requestUrl: string, sourceHeaders: Head
     return auth.handler(syntheticRequest);
 }
 
+async function runOAuthCallbackViaHandler(requestUrl: string, sourceHeaders: Headers, pathWithSearch: string) {
+    const origin = resolveRequestOrigin(requestUrl, sourceHeaders);
+    const headers = getSocialSignInHeaders(sourceHeaders);
+    const syntheticRequest = new Request(`${origin}${pathWithSearch}`, {
+        method: 'GET',
+        headers,
+    });
+    return auth.handler(syntheticRequest);
+}
+
 authRoutes.post('/desktop/init', async (c) => {
     const body = await c.req.json().catch(() => null);
     const parsed = desktopInitSchema.safeParse(body);
@@ -242,6 +252,27 @@ authRoutes.get('/sign-in/social-direct', async (c) => {
     } catch (error) {
         console.error(`[auth] GET /auth/sign-in/social-direct — ERROR after ${Date.now() - start}ms:`, error);
         return c.json({ error: 'Social sign-in direct failed', message: String(error) }, 500);
+    }
+});
+
+authRoutes.get('/callback/google-direct', async (c) => {
+    const start = Date.now();
+    try {
+        const result = await Promise.race([
+            runOAuthCallbackViaHandler(
+                c.req.url,
+                c.req.raw.headers,
+                `/auth/callback/google${c.req.url.includes('?') ? c.req.url.slice(c.req.url.indexOf('?')) : ''}`,
+            ),
+            new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('GOOGLE_CALLBACK_DIRECT_TIMEOUT_12S')), 12_000);
+            }),
+        ]);
+        console.log(`[auth] GET /auth/callback/google-direct — done in ${Date.now() - start}ms`);
+        return result;
+    } catch (error) {
+        console.error(`[auth] GET /auth/callback/google-direct — ERROR after ${Date.now() - start}ms:`, error);
+        return c.json({ error: 'Google callback direct failed', message: String(error) }, 500);
     }
 });
 

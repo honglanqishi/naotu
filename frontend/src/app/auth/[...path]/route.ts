@@ -32,6 +32,7 @@ async function proxy(req: NextRequest) {
     const search = req.nextUrl.search; // e.g. ?foo=bar
     let target = `${BACKEND_URL}${path}${search}`;
     let method = req.method;
+    const frontendOrigin = req.nextUrl.origin;
 
     const headers = buildForwardHeaders(req);
 
@@ -69,6 +70,10 @@ async function proxy(req: NextRequest) {
         headers.delete('content-type');
     }
 
+    if (req.method === 'GET' && path === '/auth/callback/google') {
+        target = `${BACKEND_URL}/auth/callback/google-direct${search}`;
+    }
+
     try {
         const resp = await fetch(target, {
             method,
@@ -87,6 +92,25 @@ async function proxy(req: NextRequest) {
         });
 
         const respBody = resp.body;
+
+        if (req.method === 'POST' && path === '/auth/sign-in/social') {
+            const data = await resp.json().catch(() => null) as { url?: string; redirect?: boolean } | null;
+            if (data?.url) {
+                const googleUrl = new URL(data.url);
+                googleUrl.searchParams.set('redirect_uri', `${frontendOrigin}/auth/callback/google`);
+                return NextResponse.json(
+                    {
+                        ...data,
+                        url: googleUrl.toString(),
+                    },
+                    {
+                        status: resp.status,
+                        headers: respHeaders,
+                    },
+                );
+            }
+        }
+
         return new NextResponse(respBody, {
             status: resp.status,
             statusText: resp.statusText,

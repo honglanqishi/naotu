@@ -11,11 +11,15 @@
 
 const httpsProxy = process.env.HTTPS_PROXY || process.env.https_proxy;
 
-if (httpsProxy) {
+if (httpsProxy && process.env.NODE_ENV !== 'production') {
+    // 仅本地开发环境设置代理（用于翻墙访问 Google OAuth）
     const { ProxyAgent, setGlobalDispatcher } = await import('undici');
     const proxyAgent = new ProxyAgent(httpsProxy);
     setGlobalDispatcher(proxyAgent);
     console.log(`[proxy] HTTPS proxy enabled: ${httpsProxy}`);
+} else if (httpsProxy && process.env.NODE_ENV === 'production') {
+    // 生产环境警告但不设置 — 防止 Vercel 上 Neon 查询被路由到不存在的代理
+    console.warn(`[proxy] WARNING: HTTPS_PROXY is set in production (${httpsProxy}) but IGNORED to prevent Neon HTTP driver hang`);
 } else if (process.env.NODE_ENV !== 'production') {
     console.log('[proxy] No HTTPS_PROXY set. If Google OAuth fails, add HTTPS_PROXY=http://127.0.0.1:7890 to .env');
 }

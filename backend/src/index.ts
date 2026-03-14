@@ -59,44 +59,98 @@ app.get('/health', (c) => {
     });
 });
 
-// 数据库连通性诊断端点（带 10 秒超时，防止 Neon 查询挂起）
+// ── 全面数据库诊断（排除法） ─────────────────────────────
 app.get('/health/db', async (c) => {
-    const start = Date.now();
-    const dbMode = process.env.NODE_ENV === 'production' ? 'neon-http' : 'sqlite';
-    const hasDbUrl = !!process.env.DATABASE_URL;
-    const dbUrlHost = process.env.DATABASE_URL
-        ? new URL(process.env.DATABASE_URL).host
-        : 'N/A';
+    const diag: Record<string, unknown> = {};
 
-    try {
-        const result = await Promise.race([
-            db.execute(sql`SELECT 1 as ok`),
-            new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('DB_QUERY_TIMEOUT_10S')), 10_000)
-            ),
-        ]);
-        return c.json({
-            status: 'ok',
-            dbMode,
-            hasDbUrl,
-            dbUrlHost,
-            latencyMs: Date.now() - start,
-            result,
-        });
-    } catch (error) {
-        console.error('[health/db] Database check failed:', error);
-        return c.json(
-            {
-                status: 'error',
-                dbMode,
-                hasDbUrl,
-                dbUrlHost,
-                latencyMs: Date.now() - start,
-                message: String(error),
-            },
-            500
-        );
+    // ① 环境变量检查
+    diag.nodeEnv = process.env.NODE_ENV ?? '(unset)';
+    diag.hasDbUrl = !!process.env.DATABASE_URL;
+    diag.hasProxy = !!(process.env.HTTPS_PROXY || process.env.https_proxy);
+    diag.proxyValue = process.env.HTTPS_PROXY || process.env.https_proxy || 'none';
+    diag.vercel = !!process.env.VERCEL;
+    diag.vercelRegion = process.env.VERCEL_REGION ?? '(unset)';
+
+    if (process.env.DATABASE_URL) {
+        try {
+            const u = new URL(process.env.DATABASE_URL);
+            diag.dbHost = u.host;
+            diag.dbName = u.pathname.slice(1);
+            diag.dbUser = u.username;
+            diag.dbProtocol = u.protocol;
+        } catch (e) {
+            diag.dbUrlParseError = String(e);
+        }
     }
+
+    // ② 原始 fetch 测试 — 绕过 drizzle，直接 HTTP POST 到 Neon SQL 端点
+    if (process.env.DATABASE_URL) {
+        const t0 = Date.now();
+        try {
+            const u = new URL(process.env.DATABASE_URL);
+            const resp = await Promise.race([
+                fetch(`https://${u.host}/sql`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Neon-Connection-String': process.env.DATABASE_URL,
+                    },
+                    body: JSON.stringify({ query: 'SELECT 1 as ok', params: [] }),
+                }),
+                new Promise<never>((_, rej) =>
+                    setTimeout(() => rej(new Error('RAW_FETCH_TIMEOUT_8S')), 8_000)
+                ),
+            ]);
+            const body = await resp.text().catch((e: unknown) => String(e));
+            diag.rawFetch = {
+                status: resp.status,
+                latencyMs: Date.now() - t0,
+                body: body.slice(0, 500),
+            };
+        } catch (e) {
+            diag.rawFetch = { error: String(e), latencyMs: Date.now() - t0 };
+        }
+    }
+
+    // ③ Drizzle ORM 查询测试
+    {
+        const t0 = Date.now();
+        try {
+            const result = await Promise.race([
+                db.execute(sql`SELECT 1 as ok`),
+                new Promise<never>((_, rej) =>
+                    setTimeout(() => rej(new Error('DRIZZLE_TIMEOUT_8S')), 8_000)
+                ),
+            ]);
+            diag.drizzle = { ok: true, latencyMs: Date.now() - t0, result };
+        } catch (e) {
+            diag.drizzle = { error: String(e), latencyMs: Date.now() - t0 };
+        }
+    }
+
+    // ④ 表存在性检查
+    {
+        const t0 = Date.now();
+        try {
+            const tables = await Promise.race([
+                db.execute(sql`
+                    SELECT table_name FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                    ORDER BY table_name
+                `),
+                new Promise<never>((_, rej) =>
+                    setTimeout(() => rej(new Error('TABLES_TIMEOUT_8S')), 8_000)
+                ),
+            ]);
+            diag.tables = { ok: true, latencyMs: Date.now() - t0, tables };
+        } catch (e) {
+            diag.tables = { error: String(e), latencyMs: Date.now() - t0 };
+        }
+    }
+
+    const allOk = diag.rawFetch && (diag.rawFetch as Record<string, unknown>).status === 200
+        && diag.drizzle && (diag.drizzle as Record<string, unknown>).ok === true;
+    return c.json({ status: allOk ? 'ok' : 'error', ...diag }, allOk ? 200 : 500);
 });
 
 // =============================================

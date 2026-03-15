@@ -110,7 +110,7 @@ async function startFrontend(): Promise<void> {
         const { spawn } = await import('node:child_process');
         const frontendDir = path.resolve(__dirname, '..', '..', 'frontend');
 
-        frontendProcess = spawn('npx', ['next', 'dev', '--turbopack', '--port', String(FRONTEND_PORT)], {
+        frontendProcess = spawn('pnpm', ['exec', 'next', 'dev', '--turbopack', '--port', String(FRONTEND_PORT)], {
             cwd: frontendDir,
             env: {
                 ...process.env,

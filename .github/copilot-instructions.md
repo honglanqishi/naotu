@@ -83,14 +83,14 @@
 
 ```bash
 # 推荐：一键启动（SQLite，无需 Docker）
-npm run dev           # 根目录：自动迁移 + 并发启动 backend:3001 + frontend:3000
+pnpm dev           # 根目录：自动迁移 + 并发启动 backend:3001 + frontend:3000
 
 # 可选：本地 PostgreSQL（需 Docker）
-npm run dev:pg        # 启动 postgres + backend + frontend
+pnpm dev:pg        # 启动 postgres + backend + frontend
 
 # 仅执行数据库迁移
-npm run migrate:local  # SQLite（开发）
-npm run migrate        # PostgreSQL（生产）
+pnpm migrate:local  # SQLite（开发）
+pnpm migrate        # PostgreSQL（生产）
 ```
 
 ## 数据库双模式切换
@@ -476,6 +476,17 @@ document.addEventListener('scroll', handler, { passive: true });
 □ 有没有在 Suspense 内启动数据请求（而不是在外层等待）？
 ```
 
+## CI/CD 约定（2026-03-15 新增）
+
+- Web 端采用“双轨”发布：**GitHub Actions 只做 CI，Vercel 只做 frontend 自动部署**，禁止在 Actions 里再调用第二套前端 deploy，避免双重发布源。
+- 依赖管理统一使用 `pnpm` workspace：根目录持有唯一 `pnpm-lock.yaml`，禁止继续提交各子包 `package-lock.json`。
+- `.github/workflows/ci.yml` 负责 monorepo 基础校验：`pnpm install --frozen-lockfile` 后执行 `database build + Drizzle config check`、`backend build`、`frontend build`、`electron build`。
+- `.github/workflows/electron-release.yml` 只用于桌面端发版，默认仅在 `v*` tag 或手动触发时执行，不得塞进日常 PR CI。
+- 遇到网络问题，先使用 `127.0.0.1:7890` 作为 `HTTP_PROXY/HTTPS_PROXY` 代理，再执行 `pnpm install`、`pnpm add` 等联网命令。
+- frontend 在 CI 中只需要最小占位环境变量使 `next build` 通过；**CI 能编过 ≠ Vercel 生产环境变量完整**，上线前仍需核对 Vercel Dashboard。
+- 涉及 `database/`、`backend/src/db/`、鉴权代理链路（`frontend/src/app/api`、`frontend/src/app/auth`）的变更时，必须同时考虑“CI 构建通过”和“生产迁移 / 平台环境变量 / Vercel Root Directory”三件事，不能只看其中一个。
+- `frontend/next.config.ts` 中的 `outputFileTracingRoot` 只用于生产构建；在 pnpm workspace 下若开发态也开启，Turbopack 可能把仓库根误判为 Next 项目根并报 `Next.js package not found`。
+
 ---
 
 > 最后更新：2026-03-05 | 修复提醒同步字段不一致、提醒枚举归一化、XSS 防护与 worker 抢占发送
@@ -593,3 +604,7 @@ cd D:\naotu\frontend ; npx tsc --noEmit 2>&1 | Select-Object -First 40
 > 最后更新：2026-03-09 | 修复桌面 OAuth 后接口仍 401：`/auth/desktop/grant` 不再用 `session.session.token`，改为从浏览器 `cookie` 头提取 `better-auth.session_token` 回传 Electron 注入
 > 最后更新：2026-03-14 | 修复 Vercel 生产环境 Google 登录 `/auth/sign-in/social` 持续 pending/504：生产不再依赖 `next.config.ts` rewrites 代理鉴权，而改用 `frontend/src/app/auth/[...path]/route.ts` 与 `frontend/src/app/api/[...path]/route.ts` 显式代理到 `BACKEND_INTERNAL_URL`，仅转发必要头并为后端 fetch 设置显式超时；`NEXT_PUBLIC_API_URL` 不作为该场景主方案（`*.vercel.app` 间无法满足前端同域 cookie 需求）
 > 最后更新：2026-03-14 | 修复 Vercel 生产环境后端 `auth.handler(c.req.raw)` 对 `/auth/sign-in/social` 仍挂起：在 `backend/src/routes/auth.ts` 单独改为 `auth.api.signInSocial({ headers, body })`，绕过 Node 请求适配链路兼容性问题，其余 `/auth/*` 继续保留原 handler
+> 最后更新：2026-03-14 | 总结 Vercel Web Google OAuth 连环故障：该问题耗时两天的原因不是单一根因，而是 rewrite 超时、`auth.handler(c.req.raw)` 真实 POST 挂起、`auth.api.signInSocial` 未透传 state cookie、frontend/backend callback 域不一致四层串联遮蔽；以后必须按“浏览器同域 `/auth/*` -> direct signIn 是否返回完整 headers -> state cookie 是否落浏览器 -> `redirect_uri`/callback 域是否一致”的顺序排查
+> 最后更新：2026-03-15 | 新增 GitHub Actions CI/CD 基线：`.github/workflows/ci.yml` 负责 monorepo 构建校验，frontend 生产发布继续交由 Vercel Git 集成，electron 发版拆到独立 tag workflow，避免与 Web 自动部署混线
+> 最后更新：2026-03-15 | 切换全仓依赖管理到 pnpm workspace：根脚本、GitHub Actions、README 同步改为 pnpm；网络问题先走 `127.0.0.1:7890` 代理后再执行联网安装
+> 最后更新：2026-03-15 | 修复 pnpm workspace 下 Next dev Turbopack 启动崩溃：`outputFileTracingRoot` 仅保留给生产构建，避免开发态误判项目根并报 `Next.js package not found`

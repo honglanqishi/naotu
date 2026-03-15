@@ -73,3 +73,18 @@
 > 最后更新：2026-03-09 | 修复 OAuth 回归 `redirect_uri_mismatch`：开发态恢复以 `BETTER_AUTH_URL/FRONTEND_URL(3000)` 作为 redirect base，仅扩展 trustedOrigins 覆盖 3001
 > 最后更新：2026-03-09 | 修复登录成功后 maps 401 根因：`api.ts` 去掉 `|| http://localhost:3001` 回退，统一同源代理避免 auth/api 会话分叉
 > 最后更新：2026-03-09 | 修复桌面 OAuth 后 401 深层根因：grant 透传 token 改为直接使用浏览器 cookie 中的 session token，避免 `session.session.token` 与真实 cookie 值不一致
+
+## 2026-03-14 补充
+
+| 现象 | 根因 | 解决方案 |
+|---|---|---|
+| Vercel Web Google 登录先是 `/auth/sign-in/social` pending/504，修完后又变成 `state_mismatch`，表面像“同一个 bug 改了两天” | 这不是单点故障，而是 4 个串联问题叠加且互相遮蔽：1. 前端 `next.config.ts` rewrite / 宽松代理在 Vercel Serverless 上超时；2. 后端 `auth.handler(c.req.raw)` 在真实 `POST /auth/sign-in/social` 链路上挂起；3. 改用 `auth.api.signInSocial()` 后如果不透传 `Set-Cookie`，`better-auth` 的 state cookie 丢失；4. OAuth 发起与回调分别落在前端域和后端域时，`redirect_uri`、state cookie、session cookie 的域不一致，导致回调校验继续失败 | 生产 Web OAuth 必须固定为一条链路：浏览器始终请求前端同域 `/auth/*`，由 `frontend/src/app/auth/[...path]/route.ts` 显式代理到 `BACKEND_INTERNAL_URL`；后端 `/auth/sign-in/social` 单独走 `auth.api.signInSocial({ returnHeaders: true, returnStatus: true })` 返回完整 headers；前端代理重写 Google `redirect_uri` 到前端域，并把 `/auth/callback/google` 桥接回后端 direct callback，确保发起域、回调域、cookie 域一致 |
+| push 后 Vercel 自动开始构建，看起来像 `git push` 自带了部署命令 | 真正触发源是 Vercel 与 GitHub 仓库的集成 webhook；如果同时再在 GitHub Actions 里执行第二套前端 deploy，就会出现“CI 已过但上线的是另一套流程”或重复发布 | Web 端统一约定为“GitHub Actions 只做 CI，Vercel 只做 frontend deploy”；排查时优先看 Vercel Project Settings 里的 Git 绑定、Production Branch、Root Directory、Build Command，而不是怀疑本地 push 命令 |
+| pnpm / npm 联用后 CI 和本地安装结果不一致，Next.js 还会因多 lockfile 给出 workspace root 警告 | 仓库同时保留根/子包 `package-lock.json` 与 pnpm 安装结果时，依赖解析和平台识别会发生分叉 | 切换到 pnpm workspace 后统一只保留根目录 `pnpm-lock.yaml`；删除所有 `package-lock.json`，CI 和本地都使用 `pnpm install --frozen-lockfile` |
+| Windows / PowerShell 下联网安装卡住或 scoped 包命令异常 | PowerShell 对 `@scope/pkg`、代理环境变量和长连接网络异常都比较敏感，直接重试常常没有效果 | 遇到网络问题先设置 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:7890`，再执行 `pnpm install` / `pnpm add`；必要时在子目录执行，减少 shell 解析干扰 |
+| `pnpm dev` 启动前端时 Turbopack 直接 panic，报 `Next.js package not found` | `frontend/next.config.ts` 在开发态也开启了 `outputFileTracingRoot`，Turbopack 在 pnpm workspace 下会把仓库根误判成 Next 项目根，随后去错误位置解析 `next` 包 | `outputFileTracingRoot` 只在生产构建开启；开发态必须省略该配置，避免 Turbopack 的项目根解析 bug |
+
+> 最后更新：2026-03-14 | 总结 Vercel Web Google OAuth 连环故障根因：rewrite 超时、`auth.handler(c.req.raw)` 在真实 POST 挂起、state cookie 未透传、frontend/backend callback 域不一致；以后按“同域代理 -> direct signIn -> Set-Cookie -> redirect_uri/callback 域一致”顺序排查
+> 最后更新：2026-03-15 | 新增 CI/CD 陷阱：Vercel 自动构建来自 Git 集成，不是 `git push` 参数；GitHub Actions 与 Vercel 必须明确分工，避免前端双重发布源
+> 最后更新：2026-03-15 | 新增包管理迁移陷阱：仓库统一切换到 pnpm workspace 后，必须删除旧 `package-lock.json` 并在网络异常时先启用 `127.0.0.1:7890` 代理
+> 最后更新：2026-03-15 | 修复 pnpm workspace 下 Next dev Turbopack 启动崩溃：开发态禁止开启 `outputFileTracingRoot`，否则会误报 `Next.js package not found`

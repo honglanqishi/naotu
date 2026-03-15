@@ -1,0 +1,12 @@
+packages:
+  - backend
+  - database
+  - electron
+  - frontend
+
+onlyBuiltDependencies:
+  - bufferutil
+  - electron
+  - esbuild
+  - sharp
+  - utf-8-validate

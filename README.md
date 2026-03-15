@@ -24,6 +24,20 @@ naotu/
 └── .env.example
 ```
 
+## 包管理
+
+项目现已统一使用 `pnpm` workspace 管理依赖。
+
+- 根目录 `pnpm install` 会安装 `database`、`backend`、`frontend`、`electron` 四个子包依赖。
+- 请不要再提交 `package-lock.json`，锁文件统一为根目录 `pnpm-lock.yaml`。
+- Windows / PowerShell 下遇到网络问题时，先设置代理到 `127.0.0.1:7890` 再执行安装命令。
+
+```powershell
+$env:HTTP_PROXY='http://127.0.0.1:7890'
+$env:HTTPS_PROXY='http://127.0.0.1:7890'
+pnpm install
+```
+
 ## 本地开发
 
 ### 前提条件
@@ -39,6 +53,7 @@ git clone <your-repo>
 cd naotu
 cp .env.example .env
 # 编辑 .env，填写 GOOGLE_CLIENT_ID、GOOGLE_CLIENT_SECRET 等
+pnpm install
 ```
 
 ### 2. Google OAuth 配置
@@ -60,7 +75,7 @@ cp .env.example .env
 
 ```bash
 # 根目录执行（自动迁移 + 并发启动 backend & frontend）
-npm run dev
+pnpm dev
 ```
 
 首次运行会自动执行 SQLite 迁移并创建 `local.db`，后续直接复用。
@@ -73,10 +88,10 @@ npm run dev
 
 ```bash
 # 运行 PG 迁移（首次）
-npm run migrate
+pnpm migrate
 
 # 启动 PostgreSQL + backend + frontend
-npm run dev:pg
+pnpm dev:pg
 ```
 
 访问 http://localhost:3000
@@ -126,6 +141,36 @@ docker compose exec backend sh -c "cd /app && node -e \"require('./dist/db/migra
 docker compose logs -f backend
 docker compose logs -f frontend
 ```
+
+## CI/CD
+
+当前仓库采用“GitHub Actions 做 CI，Vercel 做前端自动部署”的分工。
+
+### 为什么 push 后 Vercel 会自动构建
+
+这不是 `git push` 带了额外参数，而是因为 Vercel 项目已经和 Git 仓库绑定。
+
+- push 到 Vercel 监听的分支后，GitHub webhook 会通知 Vercel。
+- Vercel 自动拉取代码、安装依赖并执行前端构建。
+- 是否生成 preview / production deployment 取决于 Vercel 项目设置，而不是本地命令。
+
+### GitHub Actions 工作流
+
+- `.github/workflows/ci.yml`：在 `pull_request` 和 `push main` 时执行，基于根目录 `pnpm-lock.yaml` 安装 workspace 依赖，并行校验 `database`、`backend`、`frontend`、`electron` 的构建链路；其中 database 采用 TypeScript + Drizzle 配置检查，避免在 CI 中改写迁移目录。
+- `.github/workflows/electron-release.yml`：仅在 `v*` tag 或手动触发时构建 Windows 桌面安装包，并上传到 GitHub Release。
+
+### 推荐发布流程
+
+1. 提交 PR，等待 GitHub Actions 的 CI 全部通过。
+2. 合并到 `main` 后，由 Vercel 自动部署前端。
+3. 如果本次变更涉及数据库结构，先执行迁移，再验证线上后端功能。
+4. 需要发布桌面端时，推送 `v*` tag 触发 Electron release workflow。
+
+### 需要配置的外部平台
+
+- GitHub 仓库：将 `CI` 设为 required status check。
+- Vercel：确认项目绑定的仓库、生产分支、Root Directory 与环境变量正确。
+- GitHub Releases：桌面端 workflow 依赖仓库默认 `GITHUB_TOKEN` 上传产物。
 
 ## API 文档
 

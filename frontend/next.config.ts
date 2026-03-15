@@ -1,7 +1,13 @@
+import * as path from 'node:path';
 import type { NextConfig } from 'next';
+
+const isDev = process.env.NODE_ENV === 'development';
 
 const nextConfig: NextConfig = {
     output: 'standalone',  // Docker 部署优化
+    // Turbopack dev 在 pnpm workspace 下会把 tracing root 当成项目根，
+    // 进而错误地去仓库根查找 next 包。只在生产构建时开启 monorepo tracing root。
+    ...(isDev ? {} : { outputFileTracingRoot: path.join(process.cwd(), '..') }),
 
     // API 请求代理
     // Vercel 生产：由 app/auth/[...path]/route.ts 和 app/api/[...path]/route.ts 显式代理

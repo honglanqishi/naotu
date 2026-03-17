@@ -16,6 +16,19 @@ const FORWARDED_HEADERS = [
     'user-agent',
 ] as const;
 
+function getProxyTimeoutMs(path: string, method: string) {
+    // OAuth 与 sign-out 在 Serverless 冷启动或数据库抖动时可能超过 10s。
+    if (path.startsWith('/auth/sign-in/social') || path.startsWith('/auth/callback/')) {
+        return 25_000;
+    }
+
+    if (path === '/auth/sign-out' && method === 'POST') {
+        return 25_000;
+    }
+
+    return 15_000;
+}
+
 function buildForwardHeaders(req: NextRequest) {
     const headers = new Headers();
     for (const name of FORWARDED_HEADERS) {
@@ -49,6 +62,7 @@ async function proxy(req: NextRequest) {
     let target = `${BACKEND_URL}${path}${search}`;
     let method = req.method;
     const frontendOrigin = req.nextUrl.origin;
+    const timeoutMs = getProxyTimeoutMs(path, req.method);
 
     const headers = buildForwardHeaders(req);
 
@@ -96,7 +110,7 @@ async function proxy(req: NextRequest) {
             headers,
             body,
             redirect: 'manual', // 不自动跟随重定向，原样返回给浏览器
-            signal: AbortSignal.timeout(10_000),
+            signal: AbortSignal.timeout(timeoutMs),
         });
 
         // 构建响应
@@ -140,13 +154,15 @@ async function proxy(req: NextRequest) {
         });
     } catch (error) {
         console.error(`[auth-proxy] ${req.method} ${target} — ERROR:`, error);
+        const isTimeout = String(error).toLowerCase().includes('timeout');
         return NextResponse.json(
             {
-                error: 'Backend proxy error',
+                error: isTimeout ? 'Backend proxy timeout' : 'Backend proxy error',
                 target,
                 message: String(error),
+                timeoutMs,
             },
-            { status: 502 }
+            { status: isTimeout ? 504 : 502 }
         );
     }
 }

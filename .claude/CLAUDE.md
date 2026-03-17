@@ -617,3 +617,4 @@ cd D:\naotu\frontend ; npx tsc --noEmit 2>&1 | Select-Object -First 40
 > 最后更新：2026-03-17 | 重构 Login + Dashboard H5 响应式：登录卡片改移动端优先尺寸/滚动容器，Dashboard 改自适应导航与抽屉侧栏、主区去固定高度、卡片网格按断点降列，移动端可操作性恢复
 > 最后更新：2026-03-17 | 修复本地 Google OAuth `invalid_code`：`LoginForm` 社交登录 callback 改相对路径，`backend auth` 开发态 trustedOrigins 覆盖 localhost 端口漂移（3000-3002），不影响生产配置
 > 最后更新：2026-03-17 | 修复本地 OAuth 回归根因：开发态 rewrites 会绕过 `app/auth/[...path]/route.ts`，统一关闭 rewrites 并强制本地/生产共用 Route Handler 代理链路
+> 最后更新：2026-03-17 | 修复生产环境新增 auth 接口（含 sign-out）超时误报：前端 auth/api 代理改为按路由分级超时（25s/15s）并将超时明确返回 504

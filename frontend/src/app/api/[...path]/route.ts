@@ -14,6 +14,14 @@ const FORWARDED_HEADERS = [
     'user-agent',
 ] as const;
 
+function getProxyTimeoutMs(path: string, method: string) {
+    if (path === '/api/maps' && (method === 'PUT' || method === 'POST')) {
+        return 25_000;
+    }
+
+    return 15_000;
+}
+
 function buildForwardHeaders(req: NextRequest) {
     const headers = new Headers();
     for (const name of FORWARDED_HEADERS) {
@@ -31,6 +39,7 @@ async function proxy(req: NextRequest) {
     const path = req.nextUrl.pathname;
     const search = req.nextUrl.search;
     const target = `${BACKEND_URL}${path}${search}`;
+    const timeoutMs = getProxyTimeoutMs(path, req.method);
 
     const headers = buildForwardHeaders(req);
 
@@ -44,7 +53,7 @@ async function proxy(req: NextRequest) {
             headers,
             body,
             redirect: 'manual',
-            signal: AbortSignal.timeout(10_000),
+            signal: AbortSignal.timeout(timeoutMs),
         });
 
         const respHeaders = new Headers();
@@ -61,13 +70,15 @@ async function proxy(req: NextRequest) {
         });
     } catch (error) {
         console.error(`[api-proxy] ${req.method} ${target} — ERROR:`, error);
+        const isTimeout = String(error).toLowerCase().includes('timeout');
         return NextResponse.json(
             {
-                error: 'Backend proxy error',
+                error: isTimeout ? 'Backend proxy timeout' : 'Backend proxy error',
                 target,
                 message: String(error),
+                timeoutMs,
             },
-            { status: 502 }
+            { status: isTimeout ? 504 : 502 }
         );
     }
 }

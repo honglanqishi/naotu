@@ -104,6 +104,7 @@
 | 本地登录修复后又回归 `invalid_code` | `frontend/next.config.ts` 在开发态 rewrites 把 `/auth/*` 直转 backend，绕过了 `frontend/src/app/auth/[...path]/route.ts` 的 OAuth 桥接与回调改写逻辑 | 统一关闭 rewrites，前后端通信全部走 `app/auth/[...path]/route.ts` 与 `app/api/[...path]/route.ts`；本地与生产共用同一代理链路，避免环境分叉 |
 | Google 回调阶段后端日志报 `invalid_client (401 Unauthorized)`，前端最终显示 `invalid_code` | Google token 交换失败属于 OAuth 客户端凭据问题（`GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET` 与 Google Cloud Console 不匹配、凭据失效或被重置），并非前端路由/回调参数问题 | 用 MCP 点击 Google 登录后确认已正确跳转到 `accounts.google.com` 且 `redirect_uri=http://localhost:3000/auth/callback/google`；若仍报 `invalid_client`，需在 Google Cloud Console 重新生成并替换本地 `GOOGLE_CLIENT_SECRET`（生产凭据不要改） |
 | 生产环境新增 `/auth/*` 接口后频繁出现 `Backend proxy error`/`TimeoutError`（常见于 `sign-out`） | 前端 Route Handler 代理把后端请求超时固定为 10s；Serverless 冷启动、数据库连接抖动或跨项目预览环境唤醒时，后端尚未返回就被前端提前 abort | 将 `frontend/src/app/auth/[...path]/route.ts` 和 `frontend/src/app/api/[...path]/route.ts` 改为按路由分级超时（OAuth/登出 25s，默认 15s），并把超时单独返回 504；多环境下仍需分别配置对应 `BACKEND_INTERNAL_URL` |
+| 生产环境 `/auth/sign-out` 在前端代理扩容后仍超时（25s 也会卡） | 后端兜底路由 `auth.handler(c.req.raw)` 在 Vercel Node 适配链路上对部分新增 auth 接口仍可能挂起；`sign-in/social` 与 `sign-out` 都会受影响 | 在 `backend/src/routes/auth.ts` 显式接管 `POST /auth/sign-out`，改为 `auth.api.signOut({ headers, asResponse: true })` direct 路由并加 12s server 超时保护，透传原始 Response/Set-Cookie |
 
 > 最后更新：2026-03-17 | 新增 H5 手势陷阱：全局 touch-action 会破坏 ReactFlow 画布手势；改为控件白名单 + 画布作用域声明
 > 最后更新：2026-03-17 | 新增响应式陷阱：桌面固定像素布局会导致登录页与 Dashboard 在 H5 端不可用，必须改为移动端优先断点布局
@@ -111,3 +112,4 @@
 > 最后更新：2026-03-17 | 修复本地 OAuth 回归：移除开发态 rewrites，强制本地与生产统一走 App Route 代理链路（auth/api）
 > 最后更新：2026-03-17 | 新增 OAuth 诊断结论：若链路跳转已正确但回调报 `invalid_client`，根因在 Google 客户端凭据本身，需更新本地 secret
 > 最后更新：2026-03-17 | 新增生产注销超时陷阱：前端 auth/api 代理不能固定 10s 超时，需按路由分级并显式返回 504 以区分后端超时与业务错误
+> 最后更新：2026-03-17 | 修复生产环境 sign-out 挂起：后端新增 `/auth/sign-out` direct 路由（`auth.api.signOut`）绕过 `auth.handler(c.req.raw)` 兼容性问题

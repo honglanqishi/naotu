@@ -104,6 +104,13 @@ async function runOAuthCallbackViaHandler(requestUrl: string, sourceHeaders: Hea
     return auth.handler(syntheticRequest);
 }
 
+async function runSignOutViaApi(sourceHeaders: Headers) {
+    return auth.api.signOut({
+        headers: sourceHeaders,
+        asResponse: true,
+    });
+}
+
 authRoutes.post('/desktop/init', async (c) => {
     const body = await c.req.json().catch(() => null);
     const parsed = desktopInitSchema.safeParse(body);
@@ -296,6 +303,23 @@ authRoutes.post('/sign-in/social', async (c) => {
     } catch (error) {
         console.error(`[auth] POST /auth/sign-in/social — api.ERROR after ${Date.now() - start}ms:`, error);
         return c.json({ error: 'Social sign-in failed', message: String(error) }, 500);
+    }
+});
+
+authRoutes.post('/sign-out', async (c) => {
+    const start = Date.now();
+    try {
+        const response = await Promise.race([
+            runSignOutViaApi(c.req.raw.headers),
+            new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('SIGN_OUT_TIMEOUT_12S')), 12_000);
+            }),
+        ]);
+        console.log(`[auth] POST /auth/sign-out (direct) — done in ${Date.now() - start}ms, status=${response.status}`);
+        return response;
+    } catch (error) {
+        console.error(`[auth] POST /auth/sign-out (direct) — ERROR after ${Date.now() - start}ms:`, error);
+        return c.json({ error: 'Sign-out failed', message: String(error) }, 500);
     }
 });
 

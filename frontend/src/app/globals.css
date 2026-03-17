@@ -117,7 +117,22 @@ input::placeholder {
   font-weight: 400;
 }
 
-
-* {
+/*
+  仅给可点击控件启用 manipulation，避免全局覆盖触摸手势。
+  ReactFlow 画布单独声明为 none，保证拖拽/缩放手势可用。
+*/
+button,
+a,
+input,
+textarea,
+select,
+label,
+[role="button"] {
   touch-action: manipulation;
+}
+
+.react-flow,
+.react-flow__pane,
+.react-flow__viewport {
+  touch-action: none;
 }

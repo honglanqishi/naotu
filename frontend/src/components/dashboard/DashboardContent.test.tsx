@@ -8,6 +8,7 @@ const mockCreateMap = jest.fn();
 const mockDeleteMap = jest.fn();
 const mockUseMindMaps = jest.fn();
 const mockUseAuthRedirect = jest.fn();
+const mockSignOut = jest.fn();
 
 jest.mock('next/navigation', () => ({
     useRouter: () => ({ push: mockPush }),
@@ -23,6 +24,10 @@ jest.mock('@/hooks/useAuthRedirect', () => ({
         if (!name) return '?';
         return name.slice(0, 2).toUpperCase();
     },
+}));
+
+jest.mock('@/lib/auth-client', () => ({
+    signOut: (...args: unknown[]) => mockSignOut(...args),
 }));
 
 function createMindMap(overrides: Partial<MindMap> = {}): MindMap {
@@ -84,6 +89,7 @@ function arrangeDashboard(options?: {
 describe('DashboardContent', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockSignOut.mockResolvedValue(undefined);
     });
 
     it('renders loading skeletons while maps are loading', () => {
@@ -189,5 +195,18 @@ describe('DashboardContent', () => {
         await user.click(screen.getByText('路线图'));
 
         expect(mockPush).toHaveBeenCalledWith('/map/map-open');
+    });
+
+    it('opens user dropdown and logs out when clicking 退出登录', async () => {
+        const user = userEvent.setup();
+        arrangeDashboard({ maps: [createMindMap()] });
+
+        await user.click(screen.getByRole('button', { name: /Alice/i }));
+        await user.click(screen.getByRole('button', { name: '退出登录' }));
+
+        await waitFor(() => {
+            expect(mockSignOut).toHaveBeenCalled();
+            expect(mockPush).toHaveBeenCalledWith('/login');
+        });
     });
 });

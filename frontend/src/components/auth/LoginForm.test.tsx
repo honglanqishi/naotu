@@ -128,7 +128,7 @@ describe('LoginForm', () => {
         expect(screen.getByPlaceholderText('Password')).toHaveValue('');
     });
 
-    it('uses the web social login flow with an absolute callback URL', async () => {
+    it('uses the web social login flow with a relative callback URL', async () => {
         const user = userEvent.setup();
         mockGet.mockReturnValue('/dashboard');
         mockSignInSocial.mockResolvedValue(undefined);
@@ -141,7 +141,7 @@ describe('LoginForm', () => {
             expect(mockSetAuthLoading).toHaveBeenCalledWith(true, 'google');
             expect(mockSignInSocial).toHaveBeenCalledWith({
                 provider: 'google',
-                callbackURL: 'http://localhost/dashboard',
+                callbackURL: '/dashboard',
             });
         });
     });

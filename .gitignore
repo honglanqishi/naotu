@@ -44,3 +44,6 @@ pgdata/
 
 # Drizzle migrations (optional — commit these if you want migration history)
 # database/migrations/
+.github/
+
+.claude/

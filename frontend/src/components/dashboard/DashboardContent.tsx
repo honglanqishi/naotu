@@ -7,6 +7,8 @@ import { formatRelativeTime } from '@/lib/utils';
 import { useMindMaps, type MindMap } from '@/hooks/useMindMaps';
 import { useAuthRedirect, getUserInitials } from '@/hooks/useAuthRedirect';
 import { Modal } from '@/components/ui/Modal';
+import { signOut } from '@/lib/auth-client';
+import { toast } from 'sonner';
 
 // ── Figma MCP 资源映射 (node 9:2) ──────────────────────────────────
 // 已下载至 /images/dashboard/，按语义命名
@@ -143,15 +145,31 @@ export function DashboardContent() {
     // ── 三点菜单 & 删除确认状态 ──
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
     const [deleteTarget, setDeleteTarget] = useState<MindMap | null>(null);
+    const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+    const [userMenuOpen, setUserMenuOpen] = useState(false);
+    const [isSigningOut, setIsSigningOut] = useState(false);
 
     // 点击页面任意空白处关闭菜单（冒泡阶段，按钮内部用 stopPropagation 防止误触发）
     // passive:true → 浏览器无需等待 preventDefault 判断，滚动更流畅
     useEffect(() => {
-        if (!menuOpenId) return;
-        const handler = () => setMenuOpenId(null);
+        if (!menuOpenId && !userMenuOpen) return;
+        const handler = () => {
+            setMenuOpenId(null);
+            setUserMenuOpen(false);
+        };
         document.addEventListener('click', handler, { passive: true });
         return () => document.removeEventListener('click', handler);
-    }, [menuOpenId]);
+    }, [menuOpenId, userMenuOpen]);
+
+    useEffect(() => {
+        const onResize = () => {
+            if (window.innerWidth >= 1024) {
+                setMobileSidebarOpen(false);
+            }
+        };
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
 
     // ── 稳定回调（useCallback）：setState setter 本身稳定，依赖数组可为空 ──
     // 确保传给 memo 子组件的回调引用不变，避免 MapCard 不必要的重渲染
@@ -186,6 +204,25 @@ export function DashboardContent() {
         setMenuOpenId(null);
         setDeleteTarget(map);
     }, []);
+
+    const handleLogout = useCallback(async () => {
+        if (isSigningOut) return;
+        setIsSigningOut(true);
+        try {
+            const result = await signOut();
+            if (result?.error) {
+                toast.error(result.error.message || '退出登录失败，请重试');
+                setIsSigningOut(false);
+                return;
+            }
+            toast.success('已退出登录');
+            setUserMenuOpen(false);
+            router.push('/login');
+        } catch {
+            toast.error('退出登录失败，请稍后重试');
+            setIsSigningOut(false);
+        }
+    }, [isSigningOut, router]);
 
     const userName = session?.user?.name || session?.user?.email || '访客用户';
     const userInitials = getUserInitials(session?.user?.name || session?.user?.email);
@@ -261,7 +298,7 @@ export function DashboardContent() {
             {/* ── Figma node 9:3 悬浮创建按钮 ── */}
             <button
                 onClick={openDialog}
-                className="absolute backdrop-blur-[6px] bg-[rgba(255,255,255,0.1)] border border-[rgba(255,255,255,0.2)] border-solid bottom-[39px] flex items-center justify-center p-px right-[32px] rounded-[9999px] size-[56px] z-[4]"
+                className="absolute backdrop-blur-[6px] bg-[rgba(255,255,255,0.1)] border border-[rgba(255,255,255,0.2)] border-solid bottom-[20px] right-[16px] sm:bottom-[39px] sm:right-[32px] hidden sm:flex items-center justify-center p-px rounded-[9999px] size-[56px] z-[4]"
                 data-node-id="9:3"
             >
                 <div className="absolute bg-[rgba(255,255,255,0)] bottom-[-1px] right-[-1px] rounded-[9999px] shadow-[0px_25px_50px_-12px_rgba(0,0,0,0.25)] size-[56px]" />
@@ -272,26 +309,33 @@ export function DashboardContent() {
 
             {/* ── Figma node 9:7 Nav 导航栏 ── */}
             <div
-                className="backdrop-blur-[10px] bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.1)] border-solid flex items-center justify-between px-[25px] py-[17px] relative shrink-0 w-full z-[3]"
+                className="backdrop-blur-[10px] bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.1)] border-solid flex items-center justify-between px-4 py-3 sm:px-[25px] sm:py-[17px] relative shrink-0 w-full z-[7]"
                 data-node-id="9:7"
             >
                 {/* Logo + 品牌名 */}
-                <div className="flex gap-[12px] items-center relative shrink-0">
+                <div className="flex gap-[10px] sm:gap-[12px] items-center relative shrink-0 min-w-0">
+                    <button
+                        className="lg:hidden flex items-center justify-center rounded-[10px] border border-[rgba(255,255,255,0.2)] bg-[rgba(255,255,255,0.05)] text-white size-[34px]"
+                        onClick={() => setMobileSidebarOpen(true)}
+                        aria-label="打开侧边栏"
+                    >
+                        ☰
+                    </button>
                     <div className="bg-[#be185d] flex items-center justify-center relative rounded-[12px] shrink-0 size-[40px]" data-node-id="9:9">
                         <div className="-translate-y-1/2 absolute bg-[rgba(255,255,255,0)] left-0 rounded-[12px] shadow-[0px_10px_15px_-3px_rgba(190,24,93,0.2),0px_4px_6px_-4px_rgba(190,24,93,0.2)] size-[40px] top-1/2" />
                         <div className="h-[23.016px] relative shrink-0 w-[24px]">
                             <img alt="" className="absolute block max-w-none size-full" src={ASSETS.logoIcon} />
                         </div>
                     </div>
-                    <div className="font-bold h-[28px] flex items-center text-[20px] text-white tracking-[-0.5px]" data-node-id="9:14">
+                    <div className="font-bold h-[28px] flex items-center text-[18px] sm:text-[20px] text-white tracking-[-0.5px] truncate" data-node-id="9:14">
                         脑图空间
                     </div>
                 </div>
 
                 {/* 右侧：搜索 + 铃铛 + 用户 */}
-                <div className="flex gap-[24px] items-center relative shrink-0">
+                <div className="flex gap-[12px] sm:gap-[24px] items-center relative shrink-0">
                     {/* 搜索框 */}
-                    <div className="flex items-start relative shrink-0" data-node-id="9:16">
+                    <div className="hidden md:flex items-start relative shrink-0" data-node-id="9:16">
                         <div className="bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] border-solid flex flex-col items-start overflow-clip pb-[11px] pl-[41px] pr-[17px] pt-[10px] relative rounded-[9999px] self-stretch shrink-0 w-[256px]" data-node-id="9:17">
                             <div className="font-normal leading-normal text-[#6b7280] text-[14px]" data-node-id="9:19">
                                 搜索思维导图...
@@ -304,40 +348,77 @@ export function DashboardContent() {
                         </div>
                     </div>
 
-                    <div className="flex gap-[16px] items-center relative shrink-0" data-node-id="9:22">
+                    <div className="flex gap-[8px] sm:gap-[16px] items-center relative shrink-0" data-node-id="9:22">
                         {/* 铃铛 */}
-                        <div className="flex flex-col items-center justify-center p-[8px] relative shrink-0" data-node-id="9:23">
+                        <div className="hidden sm:flex flex-col items-center justify-center p-[8px] relative shrink-0" data-node-id="9:23">
                             <div className="h-[19.5px] relative shrink-0 w-[15.187px]">
                                 <img alt="" className="absolute block max-w-none size-full" src={ASSETS.bellIcon} />
                             </div>
                         </div>
                         {/* 分隔线 */}
-                        <div className="flex flex-col h-[32px] items-start px-[4px] relative shrink-0 w-[9px]" data-node-id="9:26">
+                        <div className="hidden sm:flex flex-col h-[32px] items-start px-[4px] relative shrink-0 w-[9px]" data-node-id="9:26">
                             <div className="bg-[rgba(255,255,255,0.1)] h-[32px] shrink-0 w-px" />
                         </div>
                         {/* 用户胶囊 */}
-                        <div className="backdrop-blur-[5px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] border-solid flex gap-[12px] items-center pl-[9px] pr-[17px] py-[7px] relative rounded-[9999px] shrink-0" data-node-id="9:28">
-                            <div className="relative rounded-[9999px] shrink-0 size-[32px] flex items-center justify-center" data-node-id="9:29" style={{ backgroundImage: 'linear-gradient(45deg, rgb(190, 24, 93) 0%, rgb(168, 85, 247) 100%)' }}>
-                                <div className="font-bold text-[12px] text-center text-white uppercase" data-node-id="9:30">
-                                    {userInitials}
+                        <div className="relative">
+                            <button
+                                className="backdrop-blur-[5px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] border-solid flex gap-[10px] items-center pl-[8px] pr-[10px] sm:pr-[17px] py-[6px] sm:py-[7px] relative rounded-[9999px] shrink-0"
+                                data-node-id="9:28"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setUserMenuOpen((prev) => !prev);
+                                }}
+                            >
+                                <div className="relative rounded-[9999px] shrink-0 size-[32px] flex items-center justify-center" data-node-id="9:29" style={{ backgroundImage: 'linear-gradient(45deg, rgb(190, 24, 93) 0%, rgb(168, 85, 247) 100%)' }}>
+                                    <div className="font-bold text-[12px] text-center text-white uppercase" data-node-id="9:30">
+                                        {userInitials}
+                                    </div>
                                 </div>
-                            </div>
-                            <div className="font-medium h-[14px] flex items-center text-[14px] text-white" data-node-id="9:33">
-                                {userName}
-                            </div>
-                            <div className="h-[6.598px] relative shrink-0 w-[11.156px]">
-                                <img alt="" className="absolute block max-w-none size-full" src={ASSETS.chevronIcon} />
-                            </div>
+                                <div className="hidden sm:flex font-medium h-[14px] items-center text-[14px] text-white" data-node-id="9:33">
+                                    {userName}
+                                </div>
+                                <div className="hidden sm:block h-[6.598px] relative shrink-0 w-[11.156px]">
+                                    <img alt="" className="absolute block max-w-none size-full" src={ASSETS.chevronIcon} />
+                                </div>
+                            </button>
+                            {userMenuOpen && (
+                                <div
+                                    className="absolute right-0 top-[calc(100%+8px)] z-20 min-w-[140px] rounded-[10px] border border-[rgba(255,255,255,0.1)] bg-[#1e293b] p-[4px] shadow-xl"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <button
+                                        onClick={handleLogout}
+                                        disabled={isSigningOut}
+                                        className="w-full rounded-[8px] px-[12px] py-[9px] text-left text-[14px] text-red-300 transition-colors hover:bg-[rgba(255,255,255,0.06)] disabled:opacity-60"
+                                    >
+                                        {isSigningOut ? '注销中...' : '退出登录'}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
             </div>
 
             {/* ── Figma node 9:36 侧栏 + 主内容 Container ── */}
-            <div className="flex h-[958px] items-start min-h-[958px] relative shrink-0 w-full z-[2]" data-node-id="9:36">
+            <div className="flex flex-1 min-h-0 items-start relative shrink-0 w-full z-[2]" data-node-id="9:36">
+
+                {mobileSidebarOpen && (
+                    <button
+                        className="fixed inset-0 z-[5] bg-black/45 lg:hidden"
+                        onClick={() => setMobileSidebarOpen(false)}
+                        aria-label="关闭侧边栏"
+                    />
+                )}
 
                 {/* ── Figma node 9:37 Aside 侧栏 ── */}
-                <div className="backdrop-blur-[10px] bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.05)] border-solid flex flex-col gap-[48px] items-start p-[25px] relative self-stretch shrink-0 w-[256px]" data-node-id="9:37">
+                <div className={`backdrop-blur-[10px] bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.05)] border-solid flex flex-col gap-[28px] lg:gap-[48px] items-start p-[18px] lg:p-[25px] shrink-0 w-[256px] z-[6] lg:relative fixed top-[72px] bottom-0 left-0 overflow-y-auto transition-transform duration-300 ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`} data-node-id="9:37">
+                    <button
+                        className="lg:hidden self-end rounded-[8px] border border-[rgba(255,255,255,0.2)] px-2 py-1 text-white/90"
+                        onClick={() => setMobileSidebarOpen(false)}
+                    >
+                        关闭
+                    </button>
                     {/* 导航链接组 */}
                     <div className="flex flex-col gap-[4px] items-start relative shrink-0 w-full" data-node-id="9:38">
                         {/* 全部脑图（激活态） */}
@@ -399,18 +480,18 @@ export function DashboardContent() {
                 </div>
 
                 {/* ── Figma node 9:77 Main 主内容 ── */}
-                <div className="flex flex-[1_0_0] flex-col items-start min-h-px min-w-px overflow-clip p-[32px] relative self-stretch" data-node-id="9:77">
-                    <div className="flex flex-col gap-[40px] items-start max-w-[1280px] relative shrink-0 w-full" data-node-id="9:78">
+                <div className="flex flex-[1_0_0] flex-col items-start min-h-px min-w-px overflow-x-hidden p-4 sm:p-6 lg:p-[32px] relative self-stretch" data-node-id="9:77">
+                    <div className="flex flex-col gap-6 lg:gap-[40px] items-start max-w-[1280px] relative shrink-0 w-full" data-node-id="9:78">
 
                         {/* 页头：标题 + 新建按钮 */}
-                        <div className="flex items-center justify-between relative shrink-0 w-full" data-node-id="9:79">
+                        <div className="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between relative shrink-0 w-full" data-node-id="9:79">
                             <div className="flex flex-col gap-[4px] items-start relative shrink-0" data-node-id="9:80">
-                                <div className="font-bold h-[36px] flex items-center text-[30px] text-white tracking-[-0.75px]" data-node-id="9:82">我的脑图</div>
-                                <div className="font-normal h-[24px] flex items-center text-[#94a3b8] text-[16px]" data-node-id="9:84">管理并组织你的创意思考</div>
+                                <div className="font-bold h-[32px] sm:h-[36px] flex items-center text-[24px] sm:text-[30px] text-white tracking-[-0.75px]" data-node-id="9:82">我的脑图</div>
+                                <div className="font-normal min-h-[20px] flex items-center text-[#94a3b8] text-[14px] sm:text-[16px]" data-node-id="9:84">管理并组织你的创意思考</div>
                             </div>
                             <button
                                 onClick={openDialog}
-                                className="bg-[#be185d] flex gap-[8px] items-center px-[24px] py-[12px] relative rounded-[12px] shrink-0"
+                                className="bg-[#be185d] flex gap-[8px] items-center justify-center px-5 py-3 sm:px-[24px] sm:py-[12px] relative rounded-[12px] shrink-0 w-full sm:w-auto"
                                 data-node-id="9:85"
                             >
                                 <div className="absolute bg-[rgba(255,255,255,0)] inset-[0_0.97px_0_0] rounded-[12px] shadow-[0px_10px_15px_-3px_rgba(190,24,93,0.2),0px_4px_6px_-4px_rgba(190,24,93,0.2)]" />
@@ -423,7 +504,7 @@ export function DashboardContent() {
 
                         {/* ── 卡片容器：动态渲染所有脑图 + 末尾创建卡 ── */}
                         {isMapsLoading ? (
-                            <div className="grid grid-cols-4 gap-[20px] shrink-0 w-full auto-rows-[280px]" data-node-id="9:90">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-[16px] sm:gap-[20px] shrink-0 w-full auto-rows-[260px] sm:auto-rows-[280px]" data-node-id="9:90">
                                 {Array.from({ length: 4 }).map((_, index) => (
                                     <div
                                         key={`dashboard-skeleton-${index}`}
@@ -458,7 +539,7 @@ export function DashboardContent() {
                             </div>
                         ) : (
                             <div
-                                className="grid grid-cols-4 gap-[20px] shrink-0 w-full auto-rows-[280px]"
+                                className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-[16px] sm:gap-[20px] shrink-0 w-full auto-rows-[260px] sm:auto-rows-[280px]"
                                 data-node-id="9:90"
                             >
                                 {maps.map((map, i) => (

@@ -146,6 +146,10 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     const [drillStack, setDrillStack] = useState<string[]>([]);
     /** 装饰编辑弹窗状态 */
     const [decoEdit, setDecoEdit] = useState<DecorationEditState | null>(null);
+    /** 移动端布局开关 */
+    const [isMobileLayout, setIsMobileLayout] = useState(false);
+    /** 移动端属性面板是否展开 */
+    const [isMobilePropsOpen, setIsMobilePropsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const dropTargetRef = useRef<string | null>(null);
     // 追踪节点是否正在被拖拽，拖拽期间禁止 dimensions 触发 reLayout
@@ -213,11 +217,27 @@ function MapEditorInner({ mapId }: { mapId: string }) {
         }
     }, [map, setNodes, setEdges, fitView]);
 
+    // 监听视口，切换移动端布局（SSR 安全）
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const media = window.matchMedia('(max-width: 1024px)');
+        const sync = () => setIsMobileLayout(media.matches);
+        sync();
+        media.addEventListener('change', sync);
+        return () => media.removeEventListener('change', sync);
+    }, []);
+
     // 自动保存（含 viewport）
     const isSaving = useAutoSave(mapId, nodes, edges, initializedRef.current, getViewport);
 
     // ─── 右侧面板：当前选中节点 ──────────────────────────────────────────────
     const selectedNode = nodes.find((n) => n.selected) ?? null;
+
+    // 移动端选中节点后自动展开属性面板，提升编辑可达性
+    useEffect(() => {
+        if (!isMobileLayout) return;
+        if (selectedNode) setIsMobilePropsOpen(true);
+    }, [isMobileLayout, selectedNode]);
 
     /** 删除选中节点（含子孙） */
     const deleteSelectedNode = useCallback(() => {
@@ -1084,7 +1104,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
     return (
         <div
             ref={containerRef}
-            className="w-full h-screen relative overflow-hidden outline-none"
+            className="w-full h-[100dvh] relative overflow-hidden outline-none"
             style={{ background: '#061616' }}
             tabIndex={-1}
         >
@@ -1096,7 +1116,11 @@ function MapEditorInner({ mapId }: { mapId: string }) {
 
             {/* ── ReactFlow 画布（底层） ── */}
             <div
-                className="absolute inset-0 pt-16"
+                className="absolute inset-0"
+                style={{
+                    paddingTop: isMobileLayout ? 56 : 64,
+                    paddingBottom: isMobileLayout ? 96 : 0,
+                }}
                 onContextMenu={onContextMenu}
                 onDoubleClick={onCanvasDoubleClick}
                 onMouseDown={(e) => {
@@ -1149,9 +1173,10 @@ function MapEditorInner({ mapId }: { mapId: string }) {
 
             {/* ── Header ── */}
             <header
-                className="absolute top-0 left-0 right-0 h-16 z-20 flex items-center justify-between border-b"
+                className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between border-b"
                 style={{
-                    padding: '0 25px',
+                    height: isMobileLayout ? 56 : 64,
+                    padding: isMobileLayout ? '0 12px' : '0 25px',
                     backdropFilter: 'blur(6px)',
                     WebkitBackdropFilter: 'blur(6px)',
                     background: 'rgba(255,255,255,0.05)',
@@ -1159,27 +1184,58 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 }}
             >
                 {/* 左侧：Logo + 面包屑 */}
-                <div className="flex items-center gap-4">
+                <div className="flex items-center" style={{ gap: isMobileLayout ? 8 : 16 }}>
+                    {isMobileLayout && (
+                        <button
+                            onClick={() => router.push('/dashboard')}
+                            className="rounded-md border text-white/90 hover:bg-white/10"
+                            style={{
+                                width: 28,
+                                height: 28,
+                                borderColor: 'rgba(255,255,255,0.2)',
+                                background: 'rgba(255,255,255,0.04)',
+                            }}
+                            title="返回工作区"
+                        >
+                            ←
+                        </button>
+                    )}
                     <div className="flex items-center gap-2">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src="/images/editor/logo.svg" alt="logo" style={{ width: 30, height: 28.77 }} />
-                        <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.5px', color: '#fff', lineHeight: 1 }}>
+                        <img src="/images/editor/logo.svg" alt="logo" style={{ width: isMobileLayout ? 24 : 30, height: isMobileLayout ? 23 : 28.77 }} />
+                        <span style={{ fontSize: isMobileLayout ? 16 : 20, fontWeight: 700, letterSpacing: '-0.5px', color: '#fff', lineHeight: 1 }}>
                             MindFlow <span style={{ color: '#c31432' }}>Pro</span>
                         </span>
                     </div>
-                    <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.1)' }} />
-                    <div className="flex items-center gap-2">
+                    {!isMobileLayout && <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.1)' }} />}
+                    <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
                         <button
                             onClick={() => router.push('/dashboard')}
                             className="transition-colors hover:text-white"
-                            style={{ fontSize: 14, color: '#94a3b8' }}
+                            style={{ fontSize: 14, color: '#94a3b8', display: isMobileLayout ? 'none' : 'inline-flex' }}
                         >
                             My Workspace
                         </button>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src="/images/editor/breadcrumb-chevron.svg" alt="" style={{ width: 3.849, height: 6.508, opacity: 0.6 }} />
-                        <span style={{ fontSize: 14, fontWeight: 500, color: '#fff' }}>{map?.title || 'Untitled Project'}</span>
-                        {nodes.length > 0 && (
+                        {!isMobileLayout && (
+                            <>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src="/images/editor/breadcrumb-chevron.svg" alt="" style={{ width: 3.849, height: 6.508, opacity: 0.6 }} />
+                            </>
+                        )}
+                        <span
+                            style={{
+                                fontSize: isMobileLayout ? 12 : 14,
+                                fontWeight: 500,
+                                color: '#fff',
+                                maxWidth: isMobileLayout ? 130 : 320,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            {map?.title || 'Untitled Project'}
+                        </span>
+                        {!isMobileLayout && nodes.length > 0 && (
                             <span
                                 className="text-xs px-2 py-0.5 rounded-full ml-1"
                                 style={{ background: 'rgba(195,20,50,0.15)', color: '#c31432', border: '1px solid rgba(195,20,50,0.3)' }}
@@ -1187,7 +1243,7 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                                 {nodes.length} 个主题
                             </span>
                         )}
-                        {drillStack.length > 0 && (
+                        {!isMobileLayout && drillStack.length > 0 && (
                             <button
                                 onClick={drillUp}
                                 className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors ml-1"
@@ -1200,42 +1256,68 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 </div>
 
                 {/* 右侧：保存状态 + 按钮 + 头像 */}
-                <div className="flex items-center gap-4">
+                <div className="flex items-center" style={{ gap: isMobileLayout ? 8 : 16 }}>
                     {isSaving && (
                         <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>保存中...</span>
                     )}
+                    {isMobileLayout && (
+                        <button
+                            className="rounded-md border text-xs text-white/90 hover:bg-white/10"
+                            style={{
+                                height: 32,
+                                padding: '0 10px',
+                                borderColor: 'rgba(255,255,255,0.2)',
+                                background: 'rgba(255,255,255,0.04)',
+                            }}
+                            onClick={() => setIsMobilePropsOpen((prev) => !prev)}
+                        >
+                            {isMobilePropsOpen ? '收起属性' : '属性'}
+                        </button>
+                    )}
                     <button
                         className="flex items-center gap-2 rounded-lg font-medium text-white border transition-colors hover:bg-white/10"
-                        style={{ padding: '9px 17px', fontSize: 14, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
+                        style={{
+                            padding: isMobileLayout ? '8px 10px' : '9px 17px',
+                            fontSize: isMobileLayout ? 12 : 14,
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                        }}
                     >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src="/images/editor/share-icon.svg" alt="" style={{ width: 13.5, height: 14.941 }} />
-                        Share
+                        {!isMobileLayout && 'Share'}
                     </button>
-                    <button
-                        className="flex items-center gap-2 rounded-lg font-medium text-white transition-colors"
-                        style={{ padding: '8px 16px', fontSize: 14, background: '#c31432', boxShadow: '0 10px 15px -3px rgba(195,20,50,0.2)' }}
-                        onClick={() => toast.info('Export is coming soon')}
-                    >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src="/images/editor/export-icon.svg" alt="" style={{ width: 10.477, height: 12.762 }} />
-                        Export
-                    </button>
-                    <div
-                        className="flex items-center justify-center rounded-full text-xs font-bold text-white border border-white/20 flex-shrink-0"
-                        style={{ width: 32, height: 32, background: 'linear-gradient(45deg, #c31432 0%, #d946ef 100%)' }}
-                    >
-                        JD
-                    </div>
+                    {!isMobileLayout && (
+                        <>
+                            <button
+                                className="flex items-center gap-2 rounded-lg font-medium text-white transition-colors"
+                                style={{ padding: '8px 16px', fontSize: 14, background: '#c31432', boxShadow: '0 10px 15px -3px rgba(195,20,50,0.2)' }}
+                                onClick={() => toast.info('Export is coming soon')}
+                            >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src="/images/editor/export-icon.svg" alt="" style={{ width: 10.477, height: 12.762 }} />
+                                Export
+                            </button>
+                            <div
+                                className="flex items-center justify-center rounded-full text-xs font-bold text-white border border-white/20 flex-shrink-0"
+                                style={{ width: 32, height: 32, background: 'linear-gradient(45deg, #c31432 0%, #d946ef 100%)' }}
+                            >
+                                JD
+                            </div>
+                        </>
+                    )}
                 </div>
             </header>
 
             {/* ── 左侧工具栏 ── */}
             <aside
-                className="absolute left-6 z-20 flex flex-col gap-6 items-center rounded-2xl border"
+                className="absolute z-20 flex flex-col items-center rounded-2xl border"
                 style={{
-                    top: 325.5,
-                    padding: '25px 1px',
+                    left: isMobileLayout ? 12 : 24,
+                    top: isMobileLayout ? 'auto' : 325.5,
+                    bottom: isMobileLayout ? 108 : 'auto',
+                    gap: isMobileLayout ? 16 : 24,
+                    padding: isMobileLayout ? '14px 2px' : '25px 1px',
                     backdropFilter: 'blur(6px)',
                     WebkitBackdropFilter: 'blur(6px)',
                     background: 'rgba(255,255,255,0.05)',
@@ -1304,15 +1386,20 @@ function MapEditorInner({ mapId }: { mapId: string }) {
 
             {/* ── 右侧节点属性面板 ── */}
             <aside
-                className="absolute right-6 z-20 rounded-2xl border overflow-hidden flex flex-col"
+                className="absolute z-20 rounded-2xl border overflow-hidden flex flex-col transition-transform duration-300"
                 style={{
-                    top: 247,
-                    width: 288,
-                    height: 530,
+                    right: isMobileLayout ? 12 : 24,
+                    left: isMobileLayout ? 12 : 'auto',
+                    top: isMobileLayout ? 'auto' : 247,
+                    bottom: isMobileLayout ? 12 : 'auto',
+                    width: isMobileLayout ? 'auto' : 288,
+                    height: isMobileLayout ? 'min(62dvh, 520px)' : 530,
                     backdropFilter: 'blur(6px)',
                     WebkitBackdropFilter: 'blur(6px)',
                     background: 'rgba(255,255,255,0.05)',
                     borderColor: 'rgba(255,255,255,0.1)',
+                    transform: isMobileLayout && !isMobilePropsOpen ? 'translateY(calc(100% + 16px))' : 'translateY(0)',
+                    pointerEvents: isMobileLayout && !isMobilePropsOpen ? 'none' : 'auto',
                 }}
             >
                 {/* 标题栏 */}
@@ -1322,7 +1409,16 @@ function MapEditorInner({ mapId }: { mapId: string }) {
                 >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src="/images/editor/node-props-icon.svg" alt="" style={{ width: 18, height: 18 }} />
-                    <span style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Node Properties</span>
+                    <span style={{ fontSize: 18, fontWeight: 700, color: '#fff', flex: 1 }}>Node Properties</span>
+                    {isMobileLayout && (
+                        <button
+                            className="text-xs rounded-md px-2 py-1 border text-white/80 hover:bg-white/10"
+                            style={{ borderColor: 'rgba(255,255,255,0.15)' }}
+                            onClick={() => setIsMobilePropsOpen(false)}
+                        >
+                            收起
+                        </button>
+                    )}
                 </div>
 
                 {/* 内容 */}
@@ -1446,11 +1542,13 @@ function MapEditorInner({ mapId }: { mapId: string }) {
 
             {/* ── 底部缩放工具栏 ── */}
             <div
-                className="absolute bottom-8 left-1/2 z-20 flex items-center gap-4 rounded-full border"
+                className="absolute left-1/2 z-20 flex items-center gap-4 rounded-full border"
                 style={{
+                    bottom: isMobileLayout ? 12 : 32,
                     transform: 'translateX(-50%)',
-                    width: 288,
-                    padding: '13px 25px',
+                    width: isMobileLayout ? 'calc(100vw - 24px)' : 288,
+                    maxWidth: isMobileLayout ? 420 : 288,
+                    padding: isMobileLayout ? '12px 16px' : '13px 25px',
                     backdropFilter: 'blur(6px)',
                     WebkitBackdropFilter: 'blur(6px)',
                     background: 'rgba(255,255,255,0.05)',

@@ -613,3 +613,5 @@ cd D:\naotu\frontend ; npx tsc --noEmit 2>&1 | Select-Object -First 40
 > 最后更新：2026-03-15 | 修复 pnpm workspace 下 Next dev Turbopack 启动崩溃：`outputFileTracingRoot` 仅保留给生产构建，避免开发态误判项目根并报 `Next.js package not found`
 > 最后更新：2026-03-15 | 修复运行时一致性与安全问题：CRON_SECRET 未配置默认放行、none 提醒误入库、脑图更新与提醒同步改为单事务、OAuth 代理改用 clone 读取响应并校验 Google 跳转域
 > 最后更新：2026-03-15 | 建立前端 Jest 单测基线：新增 next/jest 配置、Testing Library setup，以及登录页/看板页的页面组合测试与核心交互测试
+> 最后更新：2026-03-17 | 重构 MapEditor H5 响应式：新增移动端布局分支（头部精简、左侧工具栏重排、右侧属性抽屉、底部工具栏自适应）并修复全局 `touch-action` 影响画布手势问题
+> 最后更新：2026-03-17 | 重构 Login + Dashboard H5 响应式：登录卡片改移动端优先尺寸/滚动容器，Dashboard 改自适应导航与抽屉侧栏、主区去固定高度、卡片网格按断点降列，移动端可操作性恢复

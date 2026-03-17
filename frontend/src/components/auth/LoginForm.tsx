@@ -103,7 +103,8 @@ export function LoginForm() {
         try {
             const result = await signIn.social({
                 provider: 'google',
-                callbackURL: `${window.location.origin}${callbackUrl}`,
+                // 使用相对路径，避免本地端口漂移（3000/3002）导致 callback 域不一致
+                callbackURL: callbackUrl,
             });
             if (result?.error) {
                 console.error('[Auth] Google sign-in error:', result.error);
@@ -126,20 +127,20 @@ export function LoginForm() {
 
     return (
         <div
-            className="relative w-[690px] max-w-[95vw] animate-fade-in bg-white/10 backdrop-blur-xl border-[3px] border-white/79 rounded-[40px] p-[45px_92px_44px]"
+            className="relative w-full max-w-[690px] animate-fade-in bg-white/10 backdrop-blur-xl border-2 border-white/60 rounded-[24px] sm:rounded-[32px] lg:rounded-[40px] px-5 py-6 sm:px-10 sm:py-8 lg:px-[92px] lg:py-[44px] max-h-[calc(100dvh-2rem)] overflow-y-auto"
         >
             <form onSubmit={isSignUp ? handleSignUp : handleSignIn} className="flex flex-col">
-                <p className="text-[24px] font-bold text-white leading-normal">
+                <p className="text-[18px] sm:text-[22px] lg:text-[24px] font-bold text-white leading-normal">
                     Your logo
                 </p>
 
-                <h1 className="text-[38px] font-bold text-white leading-normal mt-[2px]">
+                <h1 className="text-[30px] sm:text-[34px] lg:text-[38px] font-bold text-white leading-normal mt-[2px]">
                     {isSignUp ? 'Register' : 'Login'}
                 </h1>
 
                 {isSignUp && (
-                    <div className="mt-[18px]">
-                        <label className="block text-[18px] font-normal text-white leading-normal mb-[2px]">
+                    <div className="mt-4 sm:mt-[18px]">
+                        <label className="block text-[16px] sm:text-[18px] font-normal text-white leading-normal mb-[2px]">
                             Name
                         </label>
                         <input
@@ -148,13 +149,13 @@ export function LoginForm() {
                             onChange={(e) => setName(e.target.value)}
                             placeholder="Your full name"
                             required
-                            className="w-full h-[50px] bg-white rounded-[10px] px-[23px] text-[14px] font-normal outline-none border border-[#bcbec0] text-[#333]"
+                            className="w-full h-12 sm:h-[50px] bg-white rounded-[10px] px-4 sm:px-[23px] text-[14px] font-normal outline-none border border-[#bcbec0] text-[#333]"
                         />
                     </div>
                 )}
 
-                <div className="mt-[18px]">
-                    <label className="block text-[18px] font-normal text-white leading-normal mb-[2px]">
+                <div className="mt-4 sm:mt-[18px]">
+                    <label className="block text-[16px] sm:text-[18px] font-normal text-white leading-normal mb-[2px]">
                         Email
                     </label>
                     <input
@@ -163,12 +164,12 @@ export function LoginForm() {
                         onChange={(e) => setEmail(e.target.value)}
                         placeholder="username@gmail.com"
                         required
-                        className="w-full h-[50px] bg-white rounded-[10px] px-[23px] text-[14px] font-normal outline-none border border-[#bcbec0] text-[#333]"
+                        className="w-full h-12 sm:h-[50px] bg-white rounded-[10px] px-4 sm:px-[23px] text-[14px] font-normal outline-none border border-[#bcbec0] text-[#333]"
                     />
                 </div>
 
-                <div className="mt-[25px]">
-                    <label className="block text-[18px] font-normal text-white leading-normal mb-[2px]">
+                <div className="mt-5 sm:mt-[25px]">
+                    <label className="block text-[16px] sm:text-[18px] font-normal text-white leading-normal mb-[2px]">
                         Password
                     </label>
                     <div className="relative">
@@ -179,12 +180,12 @@ export function LoginForm() {
                             placeholder="Password"
                             required
                             minLength={6}
-                            className="w-full h-[50px] bg-white rounded-[10px] px-[23px] pr-[48px] text-[14px] font-normal outline-none border border-[#bcbec0] text-[#333]"
+                            className="w-full h-12 sm:h-[50px] bg-white rounded-[10px] px-4 sm:px-[23px] pr-12 text-[14px] font-normal outline-none border border-[#bcbec0] text-[#333]"
                         />
                         <button
                             type="button"
                             onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-[16px] top-1/2 -translate-y-1/2 w-[16px] h-[16px] cursor-pointer"
+                            className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 cursor-pointer"
                         >
                             <Image
                                 src="/icons/eye-hide.svg"
@@ -197,7 +198,7 @@ export function LoginForm() {
                 </div>
 
                 {!isSignUp && (
-                    <p className="text-[12px] font-normal text-white leading-normal mt-[15px] cursor-pointer hover:underline">
+                    <p className="text-[12px] font-normal text-white leading-normal mt-3 sm:mt-[15px] cursor-pointer hover:underline">
                         Forgot Password?
                     </p>
                 )}
@@ -205,23 +206,23 @@ export function LoginForm() {
                 <button
                     type="submit"
                     disabled={isLoading}
-                    className="w-full h-[50px] rounded-[10px] text-[20px] font-bold text-white mt-[40px] cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed bg-[#bd0c47]"
+                    className="w-full h-12 sm:h-[50px] rounded-[10px] text-[18px] sm:text-[20px] font-bold text-white mt-7 sm:mt-[40px] cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed bg-[#bd0c47]"
                 >
                     {isLoading
                         ? isSignUp ? 'Creating account...' : 'Signing in...'
                         : isSignUp ? 'Create Account' : 'Sign in'}
                 </button>
 
-                <p className="text-[14px] font-normal text-white leading-normal text-center mt-[30px]">
+                <p className="text-[14px] font-normal text-white leading-normal text-center mt-6 sm:mt-[30px]">
                     or continue with
                 </p>
 
-                <div className="flex justify-center mt-[26px]">
+                <div className="flex justify-center mt-5 sm:mt-[26px]">
                     <button
                         type="button"
                         onClick={handleGoogleLogin}
                         disabled={!!loadingProvider}
-                        className="flex items-center justify-center w-[200px] h-[50px] bg-white rounded-[10px] cursor-pointer transition-opacity hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed gap-[8px] border border-[#bcbec0]"
+                        className="flex items-center justify-center w-full max-w-[260px] h-12 sm:h-[50px] bg-white rounded-[10px] cursor-pointer transition-opacity hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed gap-[8px] border border-[#bcbec0]"
                         aria-label="使用 Google 账号登录"
                     >
                         {loadingProvider === 'google' ? (
@@ -235,7 +236,7 @@ export function LoginForm() {
                     </button>
                 </div>
 
-                <p className="text-[14px] font-normal text-white leading-normal text-center mt-[28px]">
+                <p className="text-[14px] font-normal text-white leading-normal text-center mt-6 sm:mt-[28px]">
                     {isSignUp ? 'Already have an account? ' : "Don't have an account yet? "}
                     <span
                         className="font-semibold cursor-pointer hover:underline"

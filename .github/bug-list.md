@@ -93,3 +93,19 @@
 > 最后更新：2026-03-15 | 新增包管理迁移陷阱：仓库统一切换到 pnpm workspace 后，必须删除旧 `package-lock.json` 并在网络异常时先启用 `127.0.0.1:7890` 代理
 > 最后更新：2026-03-15 | 修复 pnpm workspace 下 Next dev Turbopack 启动崩溃：开发态禁止开启 `outputFileTracingRoot`，否则会误报 `Next.js package not found`
 > 最后更新：2026-03-15 | 新增运行时陷阱记录：CRON_SECRET 缺失默认放行、none 提醒误入库、脑图更新与提醒同步缺少事务、OAuth 代理消费响应体后复用 stream
+
+## 2026-03-17 补充
+
+| 现象 | 根因 | 解决方案 |
+|---|---|---|
+| H5 端 Map 画布拖拽/双指缩放异常或失效 | 在全局 `*` 上设置 `touch-action: manipulation`，覆盖了 ReactFlow 画布手势策略 | 禁止全局 `*` 设置 touch-action；改为仅对白名单交互控件设置 `manipulation`，并为 `.react-flow/.react-flow__pane/.react-flow__viewport` 显式设置 `touch-action: none` |
+| Dashboard / 登录页在移动端不可用（溢出、遮挡、不可点击） | 页面采用桌面稿固定像素（固定容器宽高、固定侧栏与网格列数），缺少断点与移动端布局分支 | 移动端优先重构：移除固定高度主容器、侧栏改抽屉、卡片网格按断点降列、导航信息折叠、表单与背景装饰按断点缩放/隐藏 |
+| 本地 Google 登录回调页报 `CODE: invalid_code` | 本地端口漂移（如 3002）导致 OAuth callback URL / trusted origin 与后端开发配置不一致，state/callback 校验失败 | 前端 `signIn.social` 使用相对 `callbackURL`（如 `/dashboard`）；后端开发态 `trustedOrigins` 增补 `localhost/127.0.0.1` 相邻端口（3000-3002），生产逻辑保持不变 |
+| 本地登录修复后又回归 `invalid_code` | `frontend/next.config.ts` 在开发态 rewrites 把 `/auth/*` 直转 backend，绕过了 `frontend/src/app/auth/[...path]/route.ts` 的 OAuth 桥接与回调改写逻辑 | 统一关闭 rewrites，前后端通信全部走 `app/auth/[...path]/route.ts` 与 `app/api/[...path]/route.ts`；本地与生产共用同一代理链路，避免环境分叉 |
+| Google 回调阶段后端日志报 `invalid_client (401 Unauthorized)`，前端最终显示 `invalid_code` | Google token 交换失败属于 OAuth 客户端凭据问题（`GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET` 与 Google Cloud Console 不匹配、凭据失效或被重置），并非前端路由/回调参数问题 | 用 MCP 点击 Google 登录后确认已正确跳转到 `accounts.google.com` 且 `redirect_uri=http://localhost:3000/auth/callback/google`；若仍报 `invalid_client`，需在 Google Cloud Console 重新生成并替换本地 `GOOGLE_CLIENT_SECRET`（生产凭据不要改） |
+
+> 最后更新：2026-03-17 | 新增 H5 手势陷阱：全局 touch-action 会破坏 ReactFlow 画布手势；改为控件白名单 + 画布作用域声明
+> 最后更新：2026-03-17 | 新增响应式陷阱：桌面固定像素布局会导致登录页与 Dashboard 在 H5 端不可用，必须改为移动端优先断点布局
+> 最后更新：2026-03-17 | 修复本地 OAuth `invalid_code`：回调改相对路径 + 开发态 trustedOrigins 覆盖端口漂移，避免影响生产域名链路
+> 最后更新：2026-03-17 | 修复本地 OAuth 回归：移除开发态 rewrites，强制本地与生产统一走 App Route 代理链路（auth/api）
+> 最后更新：2026-03-17 | 新增 OAuth 诊断结论：若链路跳转已正确但回调报 `invalid_client`，根因在 Google 客户端凭据本身，需更新本地 secret

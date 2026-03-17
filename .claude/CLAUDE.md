@@ -619,3 +619,4 @@ cd D:\naotu\frontend ; npx tsc --noEmit 2>&1 | Select-Object -First 40
 > 最后更新：2026-03-17 | 修复本地 OAuth 回归根因：开发态 rewrites 会绕过 `app/auth/[...path]/route.ts`，统一关闭 rewrites 并强制本地/生产共用 Route Handler 代理链路
 > 最后更新：2026-03-17 | 修复生产环境新增 auth 接口（含 sign-out）超时误报：前端 auth/api 代理改为按路由分级超时（25s/15s）并将超时明确返回 504
 > 最后更新：2026-03-17 | 修复生产环境 sign-out 仍挂起：后端显式接管 `POST /auth/sign-out`，改用 `auth.api.signOut({ asResponse:true })` direct 路由绕过 `auth.handler(c.req.raw)` 兼容性问题
+> 最后更新：2026-03-17 | 建立全接口超时兜底：后端新增 `withTimeout` 并接入 authMiddleware/maps/tags/cron，`app.onError` 统一返回 504；前端 auth/api 代理改按 HTTP 方法分级超时（写28s/读20s）

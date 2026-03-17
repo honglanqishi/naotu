@@ -7,6 +7,10 @@ import { mindmaps, generateId } from '../db/tables.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import type { AppEnv } from '../types/hono.js';
 import { syncReminders } from '../services/reminders.service.js';
+import { withTimeout } from '../lib/with-timeout.js';
+
+const MAPS_READ_TIMEOUT_MS = 12_000;
+const MAPS_WRITE_TIMEOUT_MS = 20_000;
 
 // Zod Schemas
 
@@ -38,17 +42,21 @@ mapsRoutes.use('*', authMiddleware);
 mapsRoutes.get('/', async (c) => {
     const user = c.get('user');
 
-    const maps = await db
-        .select({
-            id: mindmaps.id,
-            title: mindmaps.title,
-            description: mindmaps.description,
-            createdAt: mindmaps.createdAt,
-            updatedAt: mindmaps.updatedAt,
-        })
-        .from(mindmaps)
-        .where(eq(mindmaps.userId, user.id))
-        .orderBy(desc(mindmaps.updatedAt));
+    const maps = await withTimeout(
+        db
+            .select({
+                id: mindmaps.id,
+                title: mindmaps.title,
+                description: mindmaps.description,
+                createdAt: mindmaps.createdAt,
+                updatedAt: mindmaps.updatedAt,
+            })
+            .from(mindmaps)
+            .where(eq(mindmaps.userId, user.id))
+            .orderBy(desc(mindmaps.updatedAt)),
+        MAPS_READ_TIMEOUT_MS,
+        'MAPS_LIST_TIMEOUT_12S',
+    );
 
     return c.json({ maps });
 });
@@ -58,11 +66,15 @@ mapsRoutes.get('/:id', async (c) => {
     const user = c.get('user');
     const mapId = c.req.param('id');
 
-    const [map] = await db
-        .select()
-        .from(mindmaps)
-        .where(and(eq(mindmaps.id, mapId), eq(mindmaps.userId, user.id)))
-        .limit(1);
+    const [map] = await withTimeout(
+        db
+            .select()
+            .from(mindmaps)
+            .where(and(eq(mindmaps.id, mapId), eq(mindmaps.userId, user.id)))
+            .limit(1),
+        MAPS_READ_TIMEOUT_MS,
+        'MAPS_GET_TIMEOUT_12S',
+    );
 
     if (!map) {
         return c.json({ error: 'Mind map not found' }, 404);
@@ -84,18 +96,22 @@ mapsRoutes.post('/', zValidator('json', createMapSchema), async (c) => {
         data: { label: '主题', isRoot: true },
     };
 
-    const [map] = await db
-        .insert(mindmaps)
-        .values({
-            id: generateId(),
-            title,
-            description,
-            userId: user.id,
-            nodes: [defaultRootNode],
-            edges: [],
-            viewport: { x: 0, y: 0, zoom: 1 },
-        })
-        .returning();
+    const [map] = await withTimeout(
+        db
+            .insert(mindmaps)
+            .values({
+                id: generateId(),
+                title,
+                description,
+                userId: user.id,
+                nodes: [defaultRootNode],
+                edges: [],
+                viewport: { x: 0, y: 0, zoom: 1 },
+            })
+            .returning(),
+        MAPS_WRITE_TIMEOUT_MS,
+        'MAPS_CREATE_TIMEOUT_20S',
+    );
 
     return c.json({ map }, 201);
 });
@@ -107,32 +123,40 @@ mapsRoutes.put('/:id', zValidator('json', updateMapSchema), async (c) => {
     const updateData = c.req.valid('json');
 
     // 检查所有权
-    const [existing] = await db
-        .select({ id: mindmaps.id })
-        .from(mindmaps)
-        .where(and(eq(mindmaps.id, mapId), eq(mindmaps.userId, user.id)))
-        .limit(1);
+    const [existing] = await withTimeout(
+        db
+            .select({ id: mindmaps.id })
+            .from(mindmaps)
+            .where(and(eq(mindmaps.id, mapId), eq(mindmaps.userId, user.id)))
+            .limit(1),
+        MAPS_READ_TIMEOUT_MS,
+        'MAPS_OWNERSHIP_TIMEOUT_12S',
+    );
 
     if (!existing) {
         return c.json({ error: 'Mind map not found' }, 404);
     }
 
-    const updated = await db.transaction(async (tx: Db) => {
-        const [nextMap] = await tx
-            .update(mindmaps)
-            .set({
-                ...updateData,
-                updatedAt: new Date(),
-            })
-            .where(eq(mindmaps.id, mapId))
-            .returning();
+    const updated = await withTimeout(
+        db.transaction(async (tx: Db) => {
+            const [nextMap] = await tx
+                .update(mindmaps)
+                .set({
+                    ...updateData,
+                    updatedAt: new Date(),
+                })
+                .where(eq(mindmaps.id, mapId))
+                .returning();
 
-        if (updateData.nodes) {
-            await syncReminders(mapId, updateData.nodes, tx);
-        }
+            if (updateData.nodes) {
+                await syncReminders(mapId, updateData.nodes, tx);
+            }
 
-        return nextMap;
-    });
+            return nextMap;
+        }),
+        MAPS_WRITE_TIMEOUT_MS,
+        'MAPS_UPDATE_TIMEOUT_20S',
+    );
 
     return c.json({ map: updated });
 });
@@ -142,10 +166,14 @@ mapsRoutes.delete('/:id', async (c) => {
     const user = c.get('user');
     const mapId = c.req.param('id');
 
-    const [deleted] = await db
-        .delete(mindmaps)
-        .where(and(eq(mindmaps.id, mapId), eq(mindmaps.userId, user.id)))
-        .returning({ id: mindmaps.id });
+    const [deleted] = await withTimeout(
+        db
+            .delete(mindmaps)
+            .where(and(eq(mindmaps.id, mapId), eq(mindmaps.userId, user.id)))
+            .returning({ id: mindmaps.id }),
+        MAPS_WRITE_TIMEOUT_MS,
+        'MAPS_DELETE_TIMEOUT_20S',
+    );
 
     if (!deleted) {
         return c.json({ error: 'Mind map not found' }, 404);

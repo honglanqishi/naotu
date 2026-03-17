@@ -15,11 +15,13 @@ const FORWARDED_HEADERS = [
 ] as const;
 
 function getProxyTimeoutMs(path: string, method: string) {
-    if (path === '/api/maps' && (method === 'PUT' || method === 'POST')) {
-        return 25_000;
+    // 写操作在 Serverless 冷启动或数据库抖动时更容易超时，给更高预算。
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
+        return 28_000;
     }
 
-    return 15_000;
+    // GET/HEAD 默认较短，异常尽快失败。
+    return 20_000;
 }
 
 function buildForwardHeaders(req: NextRequest) {

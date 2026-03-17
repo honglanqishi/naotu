@@ -1,6 +1,9 @@
 import { Hono } from 'hono';
 import { processReminders } from '../workers/reminder.worker.js';
 import type { AppEnv } from '../types/hono.js';
+import { withTimeout } from '../lib/with-timeout.js';
+
+const CRON_REMINDER_TIMEOUT_MS = 25_000;
 
 const cronRoutes = new Hono<AppEnv>();
 
@@ -30,7 +33,11 @@ cronRoutes.get('/reminders', async (c) => {
         return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    await processReminders();
+    await withTimeout(
+        processReminders(),
+        CRON_REMINDER_TIMEOUT_MS,
+        'CRON_REMINDERS_TIMEOUT_25S',
+    );
     return c.json({ success: true, timestamp: new Date().toISOString() });
 });
 

@@ -13,6 +13,7 @@ import { mapsRoutes } from './routes/maps.js';
 import { tagsRoutes } from './routes/tags.js';
 import { cronRoutes } from './routes/cron.js';
 import { startReminderWorker } from './workers/reminder.worker.js';
+import { isRequestTimeoutError } from './lib/with-timeout.js';
 
 const app = new Hono();
 
@@ -246,6 +247,18 @@ app.notFound((c) => {
 // 全局错误处理
 // =============================================
 app.onError((err, c) => {
+    if (isRequestTimeoutError(err)) {
+        console.error(`[Timeout] ${err.code} after ${err.timeoutMs}ms`, err);
+        return c.json(
+            {
+                error: 'Request timeout',
+                code: err.code,
+                timeoutMs: err.timeoutMs,
+            },
+            504
+        );
+    }
+
     console.error(`[Error] ${err.message}`, err);
     return c.json(
         {

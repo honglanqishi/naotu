@@ -617,3 +617,4 @@ cd D:\naotu\frontend ; npx tsc --noEmit 2>&1 | Select-Object -First 40
 > 最后更新：2026-03-17 | 重构 Login + Dashboard H5 响应式：登录卡片改移动端优先尺寸/滚动容器，Dashboard 改自适应导航与抽屉侧栏、主区去固定高度、卡片网格按断点降列，移动端可操作性恢复
 > 最后更新：2026-03-17 | 修复生产环境新增 auth 接口（含 sign-out）超时误报：前端 auth/api 代理改为按路由分级超时（25s/15s）并将超时明确返回 504
 > 最后更新：2026-03-17 | 修复生产环境 sign-out 仍挂起：后端显式接管 `POST /auth/sign-out`，改用 `auth.api.signOut({ asResponse:true })` direct 路由绕过 `auth.handler(c.req.raw)` 兼容性问题
+> 最后更新：2026-03-17 | 建立全接口超时兜底：后端新增 `withTimeout` 并接入 authMiddleware/maps/tags/cron，`app.onError` 统一返回 504；前端 auth/api 代理改按 HTTP 方法分级超时（写28s/读20s）

@@ -17,16 +17,16 @@ const FORWARDED_HEADERS = [
 ] as const;
 
 function getProxyTimeoutMs(path: string, method: string) {
-    // OAuth 与 sign-out 在 Serverless 冷启动或数据库抖动时可能超过 10s。
+    // OAuth callback 需要留足时间，避免第三方跳转链路被前端过早中断。
     if (path.startsWith('/auth/sign-in/social') || path.startsWith('/auth/callback/')) {
-        return 25_000;
+        return 28_000;
     }
 
-    if (path === '/auth/sign-out' && method === 'POST') {
-        return 25_000;
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
+        return 28_000;
     }
 
-    return 15_000;
+    return 20_000;
 }
 
 function buildForwardHeaders(req: NextRequest) {

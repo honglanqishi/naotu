@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { eq, and, desc } from 'drizzle-orm';
-import { db } from '../db/client.js';
+import { db, type Db } from '../db/client.js';
 import { mindmaps, generateId } from '../db/tables.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import type { AppEnv } from '../types/hono.js';
@@ -117,19 +117,22 @@ mapsRoutes.put('/:id', zValidator('json', updateMapSchema), async (c) => {
         return c.json({ error: 'Mind map not found' }, 404);
     }
 
-    const [updated] = await db
-        .update(mindmaps)
-        .set({
-            ...updateData,
-            updatedAt: new Date(),
-        })
-        .where(eq(mindmaps.id, mapId))
-        .returning();
+    const updated = await db.transaction(async (tx: Db) => {
+        const [nextMap] = await tx
+            .update(mindmaps)
+            .set({
+                ...updateData,
+                updatedAt: new Date(),
+            })
+            .where(eq(mindmaps.id, mapId))
+            .returning();
 
-    // 如果更新了节点，同步提醒
-    if (updateData.nodes) {
-        await syncReminders(mapId, updateData.nodes);
-    }
+        if (updateData.nodes) {
+            await syncReminders(mapId, updateData.nodes, tx);
+        }
+
+        return nextMap;
+    });
 
     return c.json({ map: updated });
 });

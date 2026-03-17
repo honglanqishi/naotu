@@ -11,6 +11,8 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { todoReminders, generateId } from '../db/tables.js';
 
+type ReminderDbClient = typeof db;
+
 // ── 枚举类型 ──────────────────────────────────────────────────────────────────
 export type ReminderCode =
     | 'none'
@@ -144,7 +146,11 @@ interface NodeLike {
  *
  * ⚠️ 已 sent/failed 记录不删，留作发送历史。
  */
-export async function syncReminders(mindmapId: string, nodes: NodeLike[]): Promise<void> {
+export async function syncReminders(
+    mindmapId: string,
+    nodes: NodeLike[],
+    database: ReminderDbClient = db,
+): Promise<void> {
     // 1. 解析有效提醒
     const reminders: {
         id: string;
@@ -176,6 +182,8 @@ export async function syncReminders(mindmapId: string, nodes: NodeLike[]): Promi
         startDate.setHours(hours, minutes, 0, 0);
 
         const code = normalizeReminderCode(r.remind);
+        if (code === 'none') continue;
+
         const remindAt = computeRemindAt(startDate, code);
 
         reminders.push({
@@ -191,7 +199,7 @@ export async function syncReminders(mindmapId: string, nodes: NodeLike[]): Promi
     }
 
     // 2. 清除旧的 pending/processing 提醒
-    await db
+    await database
         .delete(todoReminders)
         .where(
             and(
@@ -202,6 +210,6 @@ export async function syncReminders(mindmapId: string, nodes: NodeLike[]): Promi
 
     // 3. 批量插入新提醒
     if (reminders.length > 0) {
-        await db.insert(todoReminders).values(reminders);
+        await database.insert(todoReminders).values(reminders);
     }
 }

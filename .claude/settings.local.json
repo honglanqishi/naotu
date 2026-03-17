@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -L -o icon-rocket.svg \"https://www.figma.com/api/mcp/asset/27ab1b8c-8470-4248-9461-c4cb185c9769\")",
+      "Bash(curl -L -o icon-marketing.svg \"https://www.figma.com/api/mcp/asset/37dad761-48c9-4b1c-be51-1c90c212944c\")",
+      "Bash(curl -L -o icon-development.svg \"https://www.figma.com/api/mcp/asset/fcbf51ab-b70d-49ab-8291-6b706ebe986a\")",
+      "Bash(curl -L -o icon-sales.svg \"https://www.figma.com/api/mcp/asset/45f8430f-c607-4a21-8086-1770bfc1a0dc\")",
+      "Bash(curl -L -o icon-social.svg \"https://www.figma.com/api/mcp/asset/e9999c13-436d-45e3-aa1b-5494c076caba\")",
+      "mcp__serena__search_for_pattern"
+    ]
+  }
+}

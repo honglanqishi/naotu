@@ -19,7 +19,12 @@ cronRoutes.get('/reminders', async (c) => {
     // 2. 外部 cron 服务（cron-job.org 等）使用 x-cron-secret
     const isVercelCron = c.req.header('x-vercel-cron') === '1';
     const secret = c.req.header('x-cron-secret');
-    const validSecret = !process.env.CRON_SECRET || secret === process.env.CRON_SECRET;
+    const configuredSecret = process.env.CRON_SECRET;
+    const validSecret = !!configuredSecret && secret === configuredSecret;
+
+    if (!isVercelCron && !configuredSecret) {
+        return c.json({ error: 'CRON_SECRET is not configured' }, 503);
+    }
 
     if (!isVercelCron && !validSecret) {
         return c.json({ error: 'Unauthorized' }, 401);

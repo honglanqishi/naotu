@@ -1,0 +1,431 @@
+{
+  "metadata": {
+    "figmaUrl": "https://www.figma.com/design/PMIlpOjffPYTDB4nlDI3lQ/naotu?node-id=9-411",
+    "fileKey": "PMIlpOjffPYTDB4nlDI3lQ",
+    "nodeId": "9:411",
+    "name": "MapEditor - Editor Shell Layout",
+    "description": "思维导图编辑器完整壳层布局，包含 Header、Left Aside 工具栏、Main 编辑区、Right Aside 属性面板、Bottom Controls 缩放控制"
+  },
+  "layout": {
+    "viewport": {
+      "width": 1280,
+      "height": 1024,
+      "background": "#061616"
+    },
+    "header": {
+      "position": "absolute top-0 left-0",
+      "height": 64,
+      "width": "100%",
+      "padding": "px-[25px] py-px",
+      "background": "backdrop-blur-[6px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)]",
+      "borderRadius": "0",
+      "flex": "flex items-center justify-between"
+    },
+    "leftAside": {
+      "position": "absolute",
+      "left": 24,
+      "top": "325.5px",
+      "width": 64,
+      "height": 373,
+      "padding": "px-px py-[25px]",
+      "gap": 24,
+      "background": "backdrop-blur-[6px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)]",
+      "borderRadius": 16,
+      "flex": "flex flex-col items-center"
+    },
+    "main": {
+      "position": "relative",
+      "width": "full",
+      "height": 1024,
+      "paddingTop": 64,
+      "flex": "flex items-center justify-center"
+    },
+    "rightAside": {
+      "position": "absolute",
+      "right": 24,
+      "top": 247,
+      "width": 288,
+      "height": 530,
+      "maxHeight": 819.2,
+      "padding": "p-px",
+      "background": "backdrop-blur-[6px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)]",
+      "borderRadius": 16,
+      "flex": "flex flex-col"
+    },
+    "bottomControls": {
+      "position": "absolute",
+      "bottom": 32,
+      "left": "38.75%",
+      "right": "38.75%",
+      "padding": "px-[25px] py-[13px]",
+      "gap": 16,
+      "background": "backdrop-blur-[6px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)]",
+      "borderRadius": 9999,
+      "flex": "flex items-center"
+    },
+    "navigator": {
+      "position": "absolute",
+      "right": 32,
+      "bottom": 32,
+      "width": 160,
+      "height": 112,
+      "opacity": 0.6,
+      "background": "backdrop-blur-[6px] bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)]",
+      "borderRadius": 12
+    }
+  },
+  "colors": {
+    "background": "#061616",
+    "backgroundOverlay": "rgba(255,255,255,0.05)",
+    "backgroundOverlayLight": "rgba(255,255,255,0.08)",
+    "border": "rgba(255,255,255,0.1)",
+    "borderLight": "rgba(255,255,255,0.2)",
+    "text": {
+      "primary": "white",
+      "secondary": "#94a3b8",
+      "muted": "#64748b"
+    },
+    "accent": {
+      "red": "#c31432",
+      "redOverlay": "rgba(195,20,50,0.2)",
+      "redOverlayDark": "rgba(195,20,50,0.4)"
+    },
+    "status": {
+      "green": "#4ade80",
+      "blue": "#60a5fa"
+    },
+    "themeColors": [
+      "#c31432",
+      "#3b82f6",
+      "#10b981",
+      "#f59e0b",
+      "#d946ef"
+    ]
+  },
+  "typography": {
+    "fontFamily": "Plus Jakarta Sans",
+    "fontWeights": {
+      "regular": 400,
+      "medium": 500,
+      "semiBold": 600,
+      "bold": 700
+    },
+    "fontSizes": {
+      "xs": 10,
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 18,
+      "2xl": 20
+    },
+    "lineHeights": {
+      "tight": 16,
+      "normal": 20,
+      "relaxed": 28
+    },
+    "letterSpacing": {
+      "normal": "normal",
+      "wide": "0.5px"
+    },
+    "textTransform": {
+      "uppercase": "uppercase",
+      "tracking": "1.2px"
+    }
+  },
+  "components": {
+    "leftToolbar": {
+      "buttons": [
+        {
+          "id": "select",
+          "name": "Select (V)",
+          "icon": "icon-select.svg",
+          "iconSize": [16.672, 16.672],
+          "padding": 8,
+          "borderRadius": 12,
+          "active": false
+        },
+        {
+          "id": "add-node",
+          "name": "Add Node (N)",
+          "icon": "icon-add-node.svg",
+          "iconSize": [19.969, 19.969],
+          "padding": 9,
+          "borderRadius": 12,
+          "active": true,
+          "background": "rgba(195,20,50,0.2)",
+          "border": "rgba(195,20,50,0.5)"
+        },
+        {
+          "id": "connect",
+          "name": "Connect (C)",
+          "icon": "icon-connect.svg",
+          "iconSize": [22.031, 12],
+          "padding": 8,
+          "borderRadius": 12,
+          "active": false
+        },
+        {
+          "id": "styles",
+          "name": "Styles",
+          "icon": "icon-styles.svg",
+          "iconSize": [19.969, 19.969],
+          "padding": 8,
+          "borderRadius": 12,
+          "active": false,
+          "background": "rgba(255,255,255,0.1)"
+        },
+        {
+          "id": "media",
+          "name": "Media",
+          "icon": "icon-media.svg",
+          "iconSize": [18, 18],
+          "padding": 8,
+          "borderRadius": 12,
+          "active": false
+        }
+      ]
+    },
+    "nodeCard": {
+      "width": 224,
+      "height": 179,
+      "position": { "left": 250, "top": 360 },
+      "background": "rgba(255,255,255,0.08)",
+      "border": "rgba(255,255,255,0.2)",
+      "blur": 4,
+      "borderRadius": 16,
+      "shadow": "0px_25px_50px_-12px_rgba(0,0,0,0.25)",
+      "elements": {
+        "icon": {
+          "icon": "icon-rocket.svg",
+          "size": 40,
+          "background": "rgba(195,20,50,0.2)",
+          "borderRadius": 8
+        },
+        "title": {
+          "text": "Product Launch Strategy",
+          "fontSize": 18,
+          "fontWeight": "bold",
+          "color": "white",
+          "textAlign": "center"
+        },
+        "tags": {
+          "colors": ["#4ade80", "#60a5fa", "#c31432"],
+          "size": 8,
+          "gap": 8
+        }
+      }
+    },
+    "childNodes": [
+      {
+        "id": "marketing-plan",
+        "name": "Marketing Plan",
+        "icon": "icon-marketing.svg",
+        "iconSize": [19.969, 15.207],
+        "position": { "left": 550, "top": 225 },
+        "width": 176,
+        "background": "rgba(255,255,255,0.08)",
+        "borderRadius": 12
+      },
+      {
+        "id": "development",
+        "name": "Development",
+        "icon": "icon-development.svg",
+        "iconSize": [19.195, 11.156],
+        "position": { "left": 550, "top": 375 },
+        "width": 176,
+        "background": "rgba(255,255,255,0.08)",
+        "borderRadius": 12
+      },
+      {
+        "id": "sales-funnel",
+        "name": "Sales Funnel",
+        "icon": "icon-sales.svg",
+        "iconSize": [22.031, 16.031],
+        "position": { "left": 550, "top": 525 },
+        "width": 176,
+        "background": "rgba(255,255,255,0.08)",
+        "borderRadius": 12
+      },
+      {
+        "id": "social-ads",
+        "name": "Social Ads",
+        "icon": "icon-social.svg",
+        "iconSize": [13.324, 13.328],
+        "position": { "left": 800, "top": 180 },
+        "width": 160,
+        "background": "rgba(255,255,255,0.08)",
+        "borderRadius": 8
+      },
+      {
+        "id": "email-blast",
+        "name": "Email Blast",
+        "icon": "icon-email.svg",
+        "iconSize": [13.313, 10.688],
+        "position": { "left": 800, "top": 280 },
+        "width": 160,
+        "background": "rgba(255,255,255,0.08)",
+        "borderRadius": 8
+      }
+    ],
+    "rightPanel": {
+      "sections": [
+        {
+          "id": "label-text",
+          "label": "Label Text",
+          "type": "input",
+          "value": "Product Launch Strategy",
+          "placeholder": ""
+        },
+        {
+          "id": "theme-color",
+          "label": "Theme Color",
+          "type": "colorPicker",
+          "colors": [
+            { "id": "red", "color": "#c31432", "selected": true },
+            { "id": "blue", "color": "#3b82f6", "selected": false },
+            { "id": "green", "color": "#10b981", "selected": false },
+            { "id": "amber", "color": "#f59e0b", "selected": false },
+            { "id": "pink", "color": "#d946ef", "selected": false }
+          ],
+          "ring": "4px white"
+        },
+        {
+          "id": "node-icon",
+          "label": "Node Icon",
+          "type": "select",
+          "value": "Rocket Launch",
+          "icon": "icon-rocket.svg"
+        },
+        {
+          "id": "auto-layout",
+          "label": "Auto-layout",
+          "type": "toggle",
+          "value": true
+        },
+        {
+          "id": "glass-effect",
+          "label": "Glass Effect",
+          "type": "toggle",
+          "value": true
+        },
+        {
+          "id": "delete",
+          "label": "DELETE NODE",
+          "type": "button",
+          "variant": "destructive",
+          "background": "rgba(255,255,255,0.05)",
+          "border": "rgba(255,255,255,0.1)"
+        }
+      ]
+    },
+    "bottomControls": {
+      "zoom": {
+        "controls": ["zoom-out", "zoom-level", "zoom-in", "fit"],
+        "zoomLevel": "100%",
+        "buttons": [
+          { "id": "zoom-out", "icon": "icon-zoom-out.svg", "size": 13.969 },
+          { "id": "zoom-level", "text": "100%", "fontSize": 12, "fontWeight": "bold", "width": 48 },
+          { "id": "zoom-in", "icon": "icon-zoom-in.svg", "size": 13.969 },
+          { "id": "fit", "icon": "icon-fit.svg", "size": 10.477 }
+        ]
+      },
+      "divider": {
+        "style": "vertical",
+        "color": "rgba(255,255,255,0.2)",
+        "height": 16,
+        "width": 1
+      },
+      "lock": {
+        "icon": "icon-lock.svg",
+        "size": 10.5,
+        "borderRadius": 6
+      }
+    },
+    "header": {
+      "logo": {
+        "icon": "icon-logo.svg",
+        "size": [30, 28.77],
+        "name": "MindFlow",
+        "highlight": "Pro",
+        "highlightColor": "#c31432"
+      },
+      "breadcrumb": {
+        "divider": "vertical",
+        "workspace": "My Workspace",
+        "project": "Untitled Project",
+        "chevron": "icon-chevron-down.svg"
+      },
+      "actions": [
+        {
+          "id": "share",
+          "icon": "icon-share.svg",
+          "label": "Share",
+          "background": "rgba(255,255,255,0.05)",
+          "border": "rgba(255,255,255,0.1)"
+        },
+        {
+          "id": "export",
+          "icon": "icon-export.svg",
+          "label": "Export",
+          "background": "#c31432",
+          "gradient": "45deg, rgb(195, 20, 50) 0%, rgb(217, 70, 239) 100%"
+        },
+        {
+          "id": "avatar",
+          "initials": "JD",
+          "background": "linear-gradient(45deg, rgb(195, 20, 50) 0%, rgb(217, 70, 239) 100%)",
+          "size": 32
+        }
+      ]
+    }
+  },
+  "assets": {
+    "localPath": "/images/editor/node-9-411/",
+    "files": [
+      "icon-select.svg",
+      "icon-add-node.svg",
+      "icon-connect.svg",
+      "icon-styles.svg",
+      "icon-media.svg",
+      "icon-rocket.svg",
+      "icon-marketing.svg",
+      "icon-development.svg",
+      "icon-sales.svg",
+      "icon-social.svg",
+      "icon-email.svg",
+      "icon-zoom-in.svg",
+      "icon-zoom-out.svg",
+      "icon-fit.svg",
+      "icon-lock.svg",
+      "icon-chevron-down.svg",
+      "icon-node-properties.svg",
+      "icon-logo.svg",
+      "icon-arrow-down.svg",
+      "icon-share.svg",
+      "icon-export.svg",
+      "main-bg.svg"
+    ]
+  },
+  "designTokens": {
+    "spacing": {
+      "xs": 4,
+      "sm": 8,
+      "md": 12,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24,
+      "3xl": 32
+    },
+    "borderRadius": {
+      "sm": 6,
+      "md": 8,
+      "lg": 12,
+      "xl": 16,
+      "full": 9999
+    },
+    "blur": {
+      "sm": 4,
+      "md": 6
+    }
+  }
+}

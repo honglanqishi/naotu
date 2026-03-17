@@ -4,6 +4,8 @@ const BACKEND_URL = (
     process.env.BACKEND_INTERNAL_URL || 'http://localhost:3001'
 ).replace(/\/+$/, '');
 
+const GOOGLE_OAUTH_HOSTS = new Set(['accounts.google.com']);
+
 const FORWARDED_HEADERS = [
     'accept',
     'accept-language',
@@ -25,6 +27,20 @@ function buildForwardHeaders(req: NextRequest) {
     headers.set('x-forwarded-host', req.headers.get('host') || req.nextUrl.host);
     headers.set('x-forwarded-proto', req.nextUrl.protocol.replace(':', ''));
     return headers;
+}
+
+function rewriteGoogleAuthUrl(rawUrl: string, frontendOrigin: string): string | null {
+    try {
+        const url = new URL(rawUrl);
+        if (url.protocol !== 'https:' || !GOOGLE_OAUTH_HOSTS.has(url.hostname)) {
+            return null;
+        }
+
+        url.searchParams.set('redirect_uri', `${frontendOrigin}/auth/callback/google`);
+        return url.toString();
+    } catch {
+        return null;
+    }
 }
 
 async function proxy(req: NextRequest) {
@@ -91,16 +107,17 @@ async function proxy(req: NextRequest) {
             }
         });
 
-        const respBody = resp.body;
-
         if (req.method === 'POST' && path === '/auth/sign-in/social') {
-            const data = await resp.json().catch(() => null) as { url?: string; redirect?: boolean } | null;
+            const data = await resp.clone().json().catch(() => null) as { url?: string; redirect?: boolean } | null;
             if (data?.url) {
-                const redirectUri = `${frontendOrigin}/auth/callback/google`;
-                const rewrittenUrl = data.url.replace(
-                    /redirect_uri=[^&]+/,
-                    `redirect_uri=${encodeURIComponent(redirectUri)}`,
-                );
+                const rewrittenUrl = rewriteGoogleAuthUrl(data.url, frontendOrigin);
+                if (!rewrittenUrl) {
+                    return NextResponse.json(
+                        { error: 'Unexpected OAuth redirect URL' },
+                        { status: 502 }
+                    );
+                }
+
                 respHeaders.set('x-auth-proxy-bridge', '2');
                 return NextResponse.json(
                     {
@@ -116,7 +133,7 @@ async function proxy(req: NextRequest) {
             }
         }
 
-        return new NextResponse(respBody, {
+        return new NextResponse(resp.body, {
             status: resp.status,
             statusText: resp.statusText,
             headers: respHeaders,

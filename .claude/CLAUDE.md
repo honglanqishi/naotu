@@ -18,7 +18,7 @@
 > 不更新本文件 = 让下一个 AI session 重复踩同一个坑，等于浪费用户时间。
 
 
-## MCP工具使用指南
+## ⚠️ MCP工具使用指南（必读，永远执行）
 
 **搜索的时候#find_symbol, #find_referencing_symbols #insert_after_symbol. 这三个工具增加搜索效率。**
 

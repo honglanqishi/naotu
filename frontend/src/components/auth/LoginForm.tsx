@@ -126,15 +126,7 @@ export function LoginForm() {
 
     return (
         <div
-            className="relative w-[690px] max-w-[95vw] animate-fade-in"
-            style={{
-                backdropFilter: 'blur(12.5px)',
-                WebkitBackdropFilter: 'blur(12.5px)',
-                background: 'rgba(255, 255, 255, 0.1)',
-                border: '3px solid rgba(255, 255, 255, 0.79)',
-                borderRadius: '40px',
-                padding: '45px 92px 44px',
-            }}
+            className="relative w-[690px] max-w-[95vw] animate-fade-in bg-white/10 backdrop-blur-xl border-[3px] border-white/79 rounded-[40px] p-[45px_92px_44px]"
         >
             <form onSubmit={isSignUp ? handleSignUp : handleSignIn} className="flex flex-col">
                 <p className="text-[24px] font-bold text-white leading-normal">
@@ -156,8 +148,7 @@ export function LoginForm() {
                             onChange={(e) => setName(e.target.value)}
                             placeholder="Your full name"
                             required
-                            className="w-full h-[50px] bg-white rounded-[10px] px-[23px] text-[14px] font-normal outline-none"
-                            style={{ border: '1px solid #bcbec0', color: '#333' }}
+                            className="w-full h-[50px] bg-white rounded-[10px] px-[23px] text-[14px] font-normal outline-none border border-[#bcbec0] text-[#333]"
                         />
                     </div>
                 )}
@@ -172,8 +163,7 @@ export function LoginForm() {
                         onChange={(e) => setEmail(e.target.value)}
                         placeholder="username@gmail.com"
                         required
-                        className="w-full h-[50px] bg-white rounded-[10px] px-[23px] text-[14px] font-normal outline-none"
-                        style={{ border: '1px solid #bcbec0', color: '#333' }}
+                        className="w-full h-[50px] bg-white rounded-[10px] px-[23px] text-[14px] font-normal outline-none border border-[#bcbec0] text-[#333]"
                     />
                 </div>
 
@@ -189,8 +179,7 @@ export function LoginForm() {
                             placeholder="Password"
                             required
                             minLength={6}
-                            className="w-full h-[50px] bg-white rounded-[10px] px-[23px] pr-[48px] text-[14px] font-normal outline-none"
-                            style={{ border: '1px solid #bcbec0', color: '#333' }}
+                            className="w-full h-[50px] bg-white rounded-[10px] px-[23px] pr-[48px] text-[14px] font-normal outline-none border border-[#bcbec0] text-[#333]"
                         />
                         <button
                             type="button"
@@ -216,8 +205,7 @@ export function LoginForm() {
                 <button
                     type="submit"
                     disabled={isLoading}
-                    className="w-full h-[50px] rounded-[10px] text-[20px] font-bold text-white mt-[40px] cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
-                    style={{ background: '#bd0c47' }}
+                    className="w-full h-[50px] rounded-[10px] text-[20px] font-bold text-white mt-[40px] cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed bg-[#bd0c47]"
                 >
                     {isLoading
                         ? isSignUp ? 'Creating account...' : 'Signing in...'
@@ -233,8 +221,7 @@ export function LoginForm() {
                         type="button"
                         onClick={handleGoogleLogin}
                         disabled={!!loadingProvider}
-                        className="flex items-center justify-center w-[200px] h-[50px] bg-white rounded-[10px] cursor-pointer transition-opacity hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed gap-[8px]"
-                        style={{ border: '1px solid #bcbec0' }}
+                        className="flex items-center justify-center w-[200px] h-[50px] bg-white rounded-[10px] cursor-pointer transition-opacity hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed gap-[8px] border border-[#bcbec0]"
                         aria-label="使用 Google 账号登录"
                     >
                         {loadingProvider === 'google' ? (

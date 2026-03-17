@@ -28,6 +28,17 @@ interface ContextMenuProps {
 }
 
 // ── 子菜单项组件（支持 hover 展开子菜单） ─────────────────────────
+// 菜单项基础样式
+const menuItemBaseStyle = "flex items-center gap-2 w-full px-3.5 py-1.75 bg-transparent border-none cursor-pointer text-left transition-colors duration-100";
+const menuItemDisabledStyle = "cursor-not-allowed opacity-50";
+const menuItemDangerStyle = "text-red-400";
+
+// 子菜单容器样式
+const subMenuContainerClass = "fixed z-[10000] w-[180px] bg-[rgba(20,20,36,0.97)] border border-white/10 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.5),0_2px_8px_rgba(0,0,0,0.4)] backdrop-blur-xl p-1.5 overflow-hidden";
+
+// 主菜单容器样式
+const menuContainerClass = "fixed z-[9999] w-[180px] bg-[rgba(20,20,36,0.97)] border border-white/10 rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.5),0_2px_8px_rgba(0,0,0,0.4)] backdrop-blur-xl p-1.5 overflow-visible";
+
 function MenuItem({
   action,
   onClose,
@@ -85,29 +96,11 @@ function MenuItem({
     <div ref={itemRef} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
       <button
         disabled={action.disabled}
+        className={`${menuItemBaseStyle} ${action.disabled ? menuItemDisabledStyle : ''} ${action.danger ? menuItemDangerStyle : 'text-[var(--foreground)]'}`}
         onClick={() => {
           if (action.disabled || hasChildren) return;
           action.onClick?.();
           onClose();
-        }}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          width: '100%',
-          padding: '7px 14px',
-          background: 'transparent',
-          border: 'none',
-          cursor: action.disabled ? 'not-allowed' : hasChildren ? 'default' : 'pointer',
-          fontSize: 13,
-          color: action.disabled
-            ? 'rgba(255,255,255,0.25)'
-            : action.danger
-              ? '#f87171'
-              : 'var(--foreground)',
-          textAlign: 'left',
-          transition: 'background 0.1s',
-          opacity: action.disabled ? 0.5 : 1,
         }}
         onMouseEnter={(e) => {
           if (action.disabled) return;
@@ -120,13 +113,13 @@ function MenuItem({
         }}
       >
         {action.icon && (
-          <span style={{ opacity: 0.7, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <span className="opacity-70 flex items-center shrink-0">
             {action.icon}
           </span>
         )}
-        <span style={{ flex: 1 }}>{action.label}</span>
+        <span className="flex-1 text-[13px]">{action.label}</span>
         {action.shortcut && (
-          <span style={{ fontSize: 11, opacity: 0.45, marginLeft: 4, flexShrink: 0 }}>
+          <span className="text-[11px] opacity-45 ml-1 shrink-0">
             {action.shortcut}
           </span>
         )}
@@ -136,7 +129,7 @@ function MenuItem({
             height="10"
             viewBox="0 0 24 24"
             fill="currentColor"
-            style={{ opacity: 0.5, flexShrink: 0 }}
+            className="opacity-50 shrink-0"
           >
             <path d="M8 5l8 7-8 7z" />
           </svg>
@@ -144,13 +137,7 @@ function MenuItem({
       </button>
 
       {action.dividerAfter && (
-        <div
-          style={{
-            height: 1,
-            margin: '4px 10px',
-            background: 'rgba(255,255,255,0.08)',
-          }}
-        />
+        <div className="h-px my-1 mx-2.5 bg-white/8" />
       )}
 
       {/* 子菜单 */}
@@ -193,22 +180,10 @@ function SubMenu({
   return (
     <div
       data-context-submenu="true"
+      className={subMenuContainerClass}
+      style={{ left: adjustedX, top: adjustedY }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      style={{
-        position: 'fixed',
-        left: adjustedX,
-        top: adjustedY,
-        zIndex: 10000,
-        width: menuWidth,
-        background: 'rgba(20,20,36,0.97)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 10,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.4)',
-        backdropFilter: 'blur(12px)',
-        padding: '6px 0',
-        overflow: 'hidden',
-      }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {actions.map((action, idx) => (
@@ -268,20 +243,8 @@ export function ContextMenu({ x, y, actions, onClose }: ContextMenuProps) {
   return (
     <div
       ref={menuRef}
-      style={{
-        position: 'fixed',
-        left: adjustedX,
-        top: adjustedY,
-        zIndex: 9999,
-        width: menuWidth,
-        background: 'rgba(20,20,36,0.97)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 10,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.4)',
-        backdropFilter: 'blur(12px)',
-        padding: '6px 0',
-        overflow: 'visible', // allow sub-menus to overflow
-      }}
+      className={menuContainerClass}
+      style={{ left: adjustedX, top: adjustedY }}
       // 阻止内部右键再次弹出
       onContextMenu={(e) => e.preventDefault()}
     >

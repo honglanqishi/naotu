@@ -17,6 +17,13 @@ export function middleware(request: NextRequest) {
         request.cookies.get('__Secure-better-auth.session_token');
 
     const isLoginPage = pathname.startsWith('/login');
+    const isPublicLabPage =
+        pathname.startsWith('/ios-safari-lab') ||
+        pathname.startsWith('/rrweb-lab');
+
+    if (isPublicLabPage) {
+        return NextResponse.next();
+    }
 
     // 已登录用户访问 /login → 跳转 /dashboard
     if (isLoginPage && sessionToken) {

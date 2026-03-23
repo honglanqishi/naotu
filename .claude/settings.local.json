@@ -6,7 +6,23 @@
       "Bash(curl -L -o icon-development.svg \"https://www.figma.com/api/mcp/asset/fcbf51ab-b70d-49ab-8291-6b706ebe986a\")",
       "Bash(curl -L -o icon-sales.svg \"https://www.figma.com/api/mcp/asset/45f8430f-c607-4a21-8086-1770bfc1a0dc\")",
       "Bash(curl -L -o icon-social.svg \"https://www.figma.com/api/mcp/asset/e9999c13-436d-45e3-aa1b-5494c076caba\")",
-      "mcp__serena__search_for_pattern"
+      "mcp__serena__search_for_pattern",
+      "mcp__serena__list_dir",
+      "mcp__serena__activate_project",
+      "mcp__chromedevtools__navigate_page",
+      "mcp__chromedevtools__take_snapshot",
+      "mcp__chromedevtools__wait_for",
+      "Bash(ANALYZE=true pnpm build)",
+      "Bash(npx tsc:*)",
+      "Bash(echo \"Exit: $?\")",
+      "mcp__chromedevtools__list_pages",
+      "mcp__chromedevtools__emulate",
+      "mcp__chromedevtools__take_screenshot",
+      "mcp__chromedevtools__evaluate_script",
+      "mcp__chromedevtools__click",
+      "WebFetch(domain:minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com)",
+      "Skill(firecrawl)",
+      "mcp__serena__find_file"
     ]
   }
 }

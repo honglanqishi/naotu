@@ -1,39 +1,9 @@
 # Naotu（脑图）AI 编码指南
 
 ## ⚠️ AI Agent 自维护规则（必读，永远执行）
+### MCP工具使用指南
 
-**每次完成重大变更后，必须立即更新本文件，无需等待用户提醒。**
-
-触发条件（满足任一即更新）：
-- 修复了一个需要多轮排查的 bug
-- 新增或修改了项目架构、路由、数据库 schema
-- 发现了一个此前文档未记录的"坑"（行为异常、隐性约束）
-- 完成了 Figma 还原任务并遇到了新问题
-
-更新操作：
-1. 将 bug / 陷阱追加到 D:\naotu\.github\bug-list.md **「已知 Bug 与陷阱清单」** 表格（现象 / 根因 / 解决方案三列）
-2. 将架构变化更新到对应章节
-3. 在文件末尾追加一行 `> 最后更新：{日期} | {本次变更摘要}`
-
-> 不更新本文件 = 让下一个 AI session 重复踩同一个坑，等于浪费用户时间。
-
-
-## ⚠️ MCP工具使用指南（必读，永远执行）
-
-**搜索的时候#find_symbol, #find_referencing_symbols #insert_after_symbol. 这三个工具增加搜索效率。**
-
----
-
-> 最后更新：2026-03-07 | 修复 Dashboard 重构后删除/创建弹窗提前关闭与列表状态丢失问题：mutation 成功后再关弹窗，列表必须区分 loading/error/empty 三态
-
-> 最后更新：2026-03-06 | 二次重写 DashboardContent：严格还原 Figma node 9:2 绝对定位布局（h-[586px] relative 容器，5张绝对定位卡片），解决首次 CSS Grid 方案与设计稿出入过大问题，TypeScript EXIT:0
-
-> 最后更新：2026-03-05 | 标签独立到节点内容前方，保留原标签名样式与编辑逻辑，底部装饰行仅保留非标签入口
-> 最后更新：2026-03-05 | 修复底部快捷按钮对齐与评论保存入口不明显（统一22x22槽位、保存文案与快捷键提示）
-
-> 最后更新：2026-03-05 | 修复节点装饰图标对齐与尺寸不一致，装饰区统一快捷位（标签保持原标签名样式）
-
-> 最后更新：2026-03-05 | 修复多选富文本工具栏重复显示、节点超链接改为右键菜单+统一弹窗编辑
+**搜索的时候#search_for_pattern ,#find_symbol, #find_referencing_symbols #insert_after_symbol. 这些工具增加搜索效率。**
 
 ## 项目架构
 
@@ -46,7 +16,7 @@
 | `database/` | Drizzle schema 定义 + 迁移脚本（PG & SQLite 双套） |
 | `electron/` | Electron 桌面壳：主进程（IPC / 签名 / 密钥存储 / 系统通知）、preload 隔离层 |
 
-### Electron 桌面端模块
+#### Electron 桌面端模块
 
 | 文件 | 职责 |
 |---|---|
@@ -62,14 +32,14 @@
 | `frontend/src/hooks/useWallet.ts` | 钱包管理 React Query hook（创建/导入/删除/签名），遵循项目 hook 封装规范 |
 | `frontend/src/hooks/useDesktopNotifications.ts` | 桌面端事件监听 hook：交易状态推送 → toast，通知点击 → 路由跳转 |
 
-### 后端关键模块
+##### 后端关键模块
 
 | 文件 | 职责 |
 |---|---|
 | `backend/src/types/hono.ts` | 全局 `AppEnv` 类型（`AuthUser`、`AuthSession`），所有路由/中间件共用，**禁止在路由文件内重复定义 `Env`** |
 | `backend/src/services/reminders.service.ts` | 提醒业务逻辑：`ReminderCode`、`normalizeReminderCode`、`computeRemindAt`（数据驱动 `OFFSET_MS` map）、`syncReminders` |
 
-### 前端关键模块
+###### 前端关键模块
 
 | 文件 | 职责 |
 |---|---|
@@ -79,7 +49,7 @@
 | `frontend/src/hooks/useDesktopNotifications.ts` | 桌面端事件监听（交易状态/通知点击），Web 端静默降级 |
 | `frontend/src/components/ui/Modal.tsx` | 通用弹窗（黑色背景 + 卡片），替代重复的弹窗 div 模板 |
 
-## 关键开发命令
+###### 关键开发命令
 
 ```bash
 # 推荐：一键启动（SQLite，无需 Docker）
@@ -411,9 +381,7 @@ import { something } from '@/components/SomeComponent';
 ```
 
 ### 三、Re-render 优化（MEDIUM）
-
 #### ✅ 列表项目组件必须用 React.memo
-
 ```tsx
 // ❌ 禁止 — 任何父级 state 变化都触发所有 card 重渲
 {maps.map((map) => (
@@ -468,31 +436,6 @@ document.addEventListener('scroll', handler, { passive: true });
 
 > 注意：若处理器内**必须**调用 `e.preventDefault()`（如阻止表单提交），则不能加 passive。
 
-### 五、补充检查清单（每次开发完一并核对）
-
-```
-□ 新增重型组件（>50KB）有没有用 next/dynamic({ ssr: false })？
-□ 新增页面有没有 Suspense 流式 fallback？
-□ 列表渲染的 item 组件有没有 React.memo？
-□ 传给 memo 子组件的函数有没有 useCallback？
-□ document.addEventListener 有没有加 { passive: true }（不用 preventDefault 的场合）？
-□ 有没有在 Suspense 内启动数据请求（而不是在外层等待）？
-```
-
-## CI/CD 约定（2026-03-15 新增）
-
-- Web 端采用“双轨”发布：**GitHub Actions 只做 CI，Vercel 只做 frontend 自动部署**，禁止在 Actions 里再调用第二套前端 deploy，避免双重发布源。
-- 依赖管理统一使用 `pnpm` workspace：根目录持有唯一 `pnpm-lock.yaml`，禁止继续提交各子包 `package-lock.json`。
-- `.github/workflows/ci.yml` 负责 monorepo 基础校验：`pnpm install --frozen-lockfile` 后执行 `database build + Drizzle config check`、`backend build`、`frontend build`、`electron build`。
-- `.github/workflows/electron-release.yml` 只用于桌面端发版，默认仅在 `v*` tag 或手动触发时执行，不得塞进日常 PR CI。
-- 遇到网络问题，先使用 `127.0.0.1:7890` 作为 `HTTP_PROXY/HTTPS_PROXY` 代理，再执行 `pnpm install`、`pnpm add` 等联网命令。
-- frontend 在 CI 中只需要最小占位环境变量使 `next build` 通过；**CI 能编过 ≠ Vercel 生产环境变量完整**，上线前仍需核对 Vercel Dashboard。
-- 涉及 `database/`、`backend/src/db/`、鉴权代理链路（`frontend/src/app/api`、`frontend/src/app/auth`）的变更时，必须同时考虑“CI 构建通过”和“生产迁移 / 平台环境变量 / Vercel Root Directory”三件事，不能只看其中一个。
-- `frontend/next.config.ts` 中的 `outputFileTracingRoot` 只用于生产构建；在 pnpm workspace 下若开发态也开启，Turbopack 可能把仓库根误判为 Next 项目根并报 `Next.js package not found`。
-
----
-
-> 最后更新：2026-03-05 | 修复提醒同步字段不一致、提醒枚举归一化、XSS 防护与 worker 抢占发送
 
 ## Figma 设计稿还原（1:1 实现）
 
@@ -585,38 +528,3 @@ cd D:\naotu\frontend ; npx tsc --noEmit 2>&1 | Select-Object -First 40
 
 ---
 
-
-> 最后更新：2026-03-07 | MapEditor 样式壳层按 Figma node 9:411 重构：固定锚点布局（Header/Left Aside/Right Aside/Bottom Controls）+ 英文文案对齐，保留 activeTool/zoomLevel/节点编辑与删除等原交互逻辑
-
-> 最后更新：2026-03-07 | 确立 img 双轴尺寸铁律：width+height 必须同时写且取 Figma Container 精确值（不得省略/近似/用 auto），重新下载全部 SVG 覆盖旧占位文件，修复颜色圆圈 ring（4px white）与 gap（18.8px）
-
-> 最后更新：2026-03-08 | 全工程代码审查重构：后端新增 `types/hono.ts`（AppEnv）消除路由重复 Env 类型；提醒逻辑提取到 `services/reminders.service.ts`（OFFSET_MS 数据驱动替代 100 行 switch）；前端新增 `hooks/useMindMaps`、`hooks/useAuthRedirect`、`components/ui/Modal` 三个复用模块；DashboardContent 从 589 行缩减为单职责 + 16 常量归并 ASSETS 对象；前后端 tsc --noEmit 零错误
-
-> 最后更新：2026-03-08 | React/Next.js 性能优化：MapEditor 改用 next/dynamic({ ssr:false })+Suspense 流式（@xyflow/react 不再阻塞 SSR）；DashboardContent 提取 MapCard 为 React.memo 组件（menuOpenId 状态变化只重渲受影响卡片）；openDialog/handleMenuToggle/handleDeleteRequest 改为 useCallback 稳定化；document.addEventListener 加 { passive: true }；前端 tsc --noEmit 零错误
-
-> 最后更新：2026-03-09 | Electron 桌面端全功能补齐：链 SDK 依赖安装（ethers/@solana/web3.js/bitcoinjs-lib 等 6 包）；LoginForm 桌面端 Google OAuth 走 IPC（isDesktop→desktopGoogleLogin+onLoginSuccess 事件监听）；reminder.worker 通过 process.send() 向 Electron 主进程推送系统通知；main.ts 生产模式构建路径（standalone server+extraResources）；修复 Windows fork .bin/tsx 失败（改为 ELECTRON_RUN_AS_NODE+--import tsx）；修复 preload 加载 404（改为 tsc 编译后 electron . 启动）；dev:desktop 端到端验证通过；前后端+electron 三包 tsc --noEmit 零错误
-
-> 最后更新：2026-03-09 | 修复 Electron 沙箱 preload 模块加载失败（`module not found: ./ipc/channels.js`）：`preload.ts` 去除运行时相对导入并内联 IPC 通道常量，恢复 `window.naotuDesktop` 注入，桌面端 Google 登录按钮恢复响应
-> 最后更新：2026-03-09 | 修复桌面端 Google OAuth 白屏：`main.ts` 的 CSP 仅注入本地前后端 origin，`oauth-desktop.ts` 改为调用 better-auth 标准 `POST /auth/sign-in/social` 获取授权 URL 后再加载 popup
-> 最后更新：2026-03-09 | 桌面端 Google OAuth 升级为系统浏览器标准流（openExternal）：新增 `/auth/desktop/init|grant|consume` 一次性授权码桥接与 `frontend/app/desktop-auth-bridge` 页面，Electron 通过 loopback 回调消费 grant 后注入 `better-auth.session_token`
-> 最后更新：2026-03-09 | 修复系统浏览器 OAuth `state_mismatch`：新增 `/auth/desktop/start` 在浏览器上下文以 JSON `POST /auth/sign-in/social` 初始化 state，再跳转 Google，避免主进程 fetch 造成 cookie 上下文错位
-> 最后更新：2026-03-09 | 修复系统浏览器 OAuth `INVALID_ORIGIN`：`auth.ts` 开发环境自动修正 `BETTER_AUTH_URL` 误配（3000）为后端 origin（3001），并扩展 trustedOrigins 覆盖 localhost/127.0.0.1
-> 最后更新：2026-03-09 | 修复桌面端 OAuth 后 `GET /api/maps` 401：主进程登录成功后同时向 `BACKEND_URL` 与 `FRONTEND_URL` 注入 `better-auth.session_token`，覆盖 Next 同源代理场景
-> 最后更新：2026-03-09 | 修复 OAuth 回归 `redirect_uri_mismatch`：开发态 `auth.ts` 不再强制使用后端 3001 作为 baseURL，改为优先 `BETTER_AUTH_URL/FRONTEND_URL(3000)`，同时保留 3001 在 trustedOrigins 以兼容桌面启动 origin
-> 最后更新：2026-03-09 | 修复登录成功后列表 401 的最终根因：`frontend/api.ts` 在 `NEXT_PUBLIC_API_URL=''` 时被 `||` 回退到 3001，导致 `/auth` 与 `/api` 分叉；改为 `?? ''` 统一同源 rewrite
-> 最后更新：2026-03-09 | 修复桌面 OAuth 后接口仍 401：`/auth/desktop/grant` 不再用 `session.session.token`，改为从浏览器 `cookie` 头提取 `better-auth.session_token` 回传 Electron 注入
-> 最后更新：2026-03-14 | 修复 Vercel 生产环境 Google 登录 `/auth/sign-in/social` 持续 pending/504：生产不再依赖 `next.config.ts` rewrites 代理鉴权，而改用 `frontend/src/app/auth/[...path]/route.ts` 与 `frontend/src/app/api/[...path]/route.ts` 显式代理到 `BACKEND_INTERNAL_URL`，仅转发必要头并为后端 fetch 设置显式超时；`NEXT_PUBLIC_API_URL` 不作为该场景主方案（`*.vercel.app` 间无法满足前端同域 cookie 需求）
-> 最后更新：2026-03-14 | 修复 Vercel 生产环境后端 `auth.handler(c.req.raw)` 对 `/auth/sign-in/social` 仍挂起：在 `backend/src/routes/auth.ts` 单独改为 `auth.api.signInSocial({ headers, body })`，绕过 Node 请求适配链路兼容性问题，其余 `/auth/*` 继续保留原 handler
-> 最后更新：2026-03-14 | 总结 Vercel Web Google OAuth 连环故障：该问题耗时两天的原因不是单一根因，而是 rewrite 超时、`auth.handler(c.req.raw)` 真实 POST 挂起、`auth.api.signInSocial` 未透传 state cookie、frontend/backend callback 域不一致四层串联遮蔽；以后必须按“浏览器同域 `/auth/*` -> direct signIn 是否返回完整 headers -> state cookie 是否落浏览器 -> `redirect_uri`/callback 域是否一致”的顺序排查
-> 最后更新：2026-03-15 | 新增 GitHub Actions CI/CD 基线：`.github/workflows/ci.yml` 负责 monorepo 构建校验，frontend 生产发布继续交由 Vercel Git 集成，electron 发版拆到独立 tag workflow，避免与 Web 自动部署混线
-> 最后更新：2026-03-15 | 切换全仓依赖管理到 pnpm workspace：根脚本、GitHub Actions、README 同步改为 pnpm；网络问题先走 `127.0.0.1:7890` 代理后再执行联网安装
-> 最后更新：2026-03-15 | 修复 pnpm workspace 下 Next dev Turbopack 启动崩溃：`outputFileTracingRoot` 仅保留给生产构建，避免开发态误判项目根并报 `Next.js package not found`
-> 最后更新：2026-03-15 | 修复运行时一致性与安全问题：CRON_SECRET 未配置默认放行、none 提醒误入库、脑图更新与提醒同步改为单事务、OAuth 代理改用 clone 读取响应并校验 Google 跳转域
-> 最后更新：2026-03-15 | 建立前端 Jest 单测基线：新增 next/jest 配置、Testing Library setup，以及登录页/看板页的页面组合测试与核心交互测试
-> 最后更新：2026-03-17 | 重构 MapEditor H5 响应式：新增移动端布局分支（头部精简、左侧工具栏重排、右侧属性抽屉、底部工具栏自适应）并修复全局 `touch-action` 影响画布手势问题
-> 最后更新：2026-03-17 | 重构 Login + Dashboard H5 响应式：登录卡片改移动端优先尺寸/滚动容器，Dashboard 改自适应导航与抽屉侧栏、主区去固定高度、卡片网格按断点降列，移动端可操作性恢复
-> 最后更新：2026-03-17 | 修复本地 Google OAuth `invalid_code`：`LoginForm` 社交登录 callback 改相对路径，`backend auth` 开发态 trustedOrigins 覆盖 localhost 端口漂移（3000-3002），不影响生产配置
-> 最后更新：2026-03-17 | 修复本地 OAuth 回归根因：开发态 rewrites 会绕过 `app/auth/[...path]/route.ts`，统一关闭 rewrites 并强制本地/生产共用 Route Handler 代理链路
-> 最后更新：2026-03-17 | 修复生产环境新增 auth 接口（含 sign-out）超时误报：前端 auth/api 代理改为按路由分级超时（25s/15s）并将超时明确返回 504
-> 最后更新：2026-03-17 | 修复生产环境 sign-out 仍挂起：后端显式接管 `POST /auth/sign-out`，改用 `auth.api.signOut({ asResponse:true })` direct 路由绕过 `auth.handler(c.req.raw)` 兼容性问题
-> 最后更新：2026-03-17 | 建立全接口超时兜底：后端新增 `withTimeout` 并接入 authMiddleware/maps/tags/cron，`app.onError` 统一返回 504；前端 auth/api 代理改按 HTTP 方法分级超时（写28s/读20s）

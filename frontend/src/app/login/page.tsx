@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 export default function LoginPage() {
     return (
         <main
-            className="min-h-[100dvh] w-full relative overflow-hidden flex items-center justify-center px-4 py-6 sm:px-6"
+            className="relative w-full h-[100dvh] overflow-hidden flex flex-col items-center justify-center px-4 py-6 sm:px-6"
             style={{
                 /* Figma: 2:173 - 精确渐变背景 */
                 backgroundImage: 'linear-gradient(-60.6422deg, rgb(15, 12, 41) 0%, rgb(48, 43, 99) 50%, rgb(36, 36, 62) 100%)',
@@ -104,9 +104,11 @@ export default function LoginPage() {
                 <img alt="" className="absolute block w-full h-full max-w-none" style={{ objectFit: 'fill' }} src="/images/node-2-9240.svg" />
             </div>
 
-            <Suspense fallback={<div className="text-white">Loading...</div>}>
-                <LoginForm />
-            </Suspense>
+            <div className="relative z-[2] w-full flex justify-center">
+                <Suspense fallback={<div className="text-white">Loading...</div>}>
+                    <LoginForm />
+                </Suspense>
+            </div>
         </main>
     );
 }

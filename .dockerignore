@@ -1,0 +1,24 @@
+# Ignore git and agent directories
+.git
+.github
+.agents
+.claude
+.firecrawl
+.serena
+
+# Ignore built or large node/frontend directories
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+.swc
+
+# Ignore logs and local database files
+*.log
+local.db
+
+# Ensure Docker doesn't copy local environment overrides or builds
+.env.local
+.DS_Store

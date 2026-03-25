@@ -1,0 +1,7 @@
+# For frontend context, ignore its own modules and build folders
+node_modules
+.next
+.swc
+*.log
+.env.local
+.DS_Store

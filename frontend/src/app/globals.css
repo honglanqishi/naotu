@@ -136,3 +136,151 @@ label,
 .react-flow__viewport {
   touch-action: none;
 }
+
+/* =============================================
+   Product Card Lab — 1px Border & Safari Bug
+   ============================================= */
+
+/* 方案 A：伪元素 + scale(0.5) 实现真正 1px 物理像素边框 */
+.true-1px-a {
+  position: relative;
+  width: 200px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+/* 用伪元素画边框，scale(0.5) 让 1px 在 DPR=2 上变成 1 个物理像素 */
+.true-1px-a::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  transform: scale(0.5);
+  pointer-events: none;
+  /* transform-origin: center 确保缩放从中心展开 */
+  transform-origin: center;
+}
+.true-1px-a img {
+  display: block;
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+}
+
+/* 方案 B：SVG border-image 实现真正 1px 边框 */
+.true-1px-b {
+  width: 200px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Crect x='0' y='0' width='8' height='8' fill='none' stroke='rgba(0,0,0,0.12)' stroke-width='1'/%3E%3C/svg%3E") 4 / 1px / 0 round;
+  overflow: hidden;
+}
+.true-1px-b img {
+  display: block;
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+}
+
+/* Bug 1：图片直角盖住卡片圆角（缺少 overflow:hidden） */
+.bug-card-1 {
+  width: 200px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  /* 注意：没有 overflow:hidden，图片直角直接盖住圆角 */
+}
+.bug-card-1 img {
+  display: block;
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+  /* 图片本身也没有圆角，直角矩形 */
+}
+
+/* Bug 2：动画时 Safari 圆角裁切失效 */
+@keyframes safari-bug-shake {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+.bug-card-2-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.bug-card-2-container {
+  width: 200px;
+  border-radius: 14px;
+  overflow: hidden;
+  /* 嵌套的 overflow:hidden 父容器 — 触发 Safari Bug */
+}
+.bug-card-2 {
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  /* 动画触发 Safari 圆角裁切失效 */
+  animation: safari-bug-shake 1.4s ease-in-out infinite;
+  cursor: pointer;
+  overflow: hidden;
+}
+.bug-card-2:hover {
+  animation-play-state: paused;
+}
+.bug-card-2 img {
+  display: block;
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+}
+
+/* 修复版 Bug1：加 overflow:hidden */
+.fixed-card-1 {
+  width: 200px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow: hidden; /* 修复：裁切图片圆角 */
+}
+.fixed-card-1 img {
+  display: block;
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+}
+
+/* 修复版 Bug2：clip-path 替代 overflow:hidden 的圆角裁切 */
+@keyframes fixed-shake {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+.fixed-card-2-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.fixed-card-2 {
+  width: 200px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  /* 修复：直接用 clip-path 替代 overflow:hidden 的圆角裁切 */
+  clip-path: inset(0 round 12px);
+  animation: fixed-shake 1.4s ease-in-out infinite;
+  cursor: pointer;
+}
+.fixed-card-2:hover {
+  animation-play-state: paused;
+}
+.fixed-card-2-inner {
+  border-radius: 0;
+  overflow: hidden;
+}
+.fixed-card-2 img {
+  display: block;
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+}

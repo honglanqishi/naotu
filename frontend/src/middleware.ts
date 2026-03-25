@@ -19,7 +19,8 @@ export function middleware(request: NextRequest) {
     const isLoginPage = pathname.startsWith('/login');
     const isPublicLabPage =
         pathname.startsWith('/ios-safari-lab') ||
-        pathname.startsWith('/rrweb-lab');
+        pathname.startsWith('/rrweb-lab') ||
+        pathname.startsWith('/product-card-lab');
 
     if (isPublicLabPage) {
         return NextResponse.next();
